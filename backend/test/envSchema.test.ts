@@ -29,6 +29,18 @@ describe("parseEnv", () => {
     expect(() => parseEnv({ ...valid, SENDER_POOL_SIZE: "0" })).toThrowError(/SENDER_POOL_SIZE/);
   });
 
+  it("reads queue settings with sensible defaults", () => {
+    const env = parseEnv(valid);
+    expect(env.WORKER_CONCURRENCY).toBe(5);
+    expect(env.BULLMQ_PREFIX).toBe("reachinbox");
+    expect(env.EMAIL_JOB_ATTEMPTS).toBe(3);
+    expect(env.EMAIL_JOB_BACKOFF_MS).toBe(5000);
+    expect(parseEnv({ ...valid, WORKER_CONCURRENCY: "10" }).WORKER_CONCURRENCY).toBe(10);
+    expect(() => parseEnv({ ...valid, WORKER_CONCURRENCY: "0" })).toThrowError(
+      /WORKER_CONCURRENCY/,
+    );
+  });
+
   it("rejects malformed URLs", () => {
     expect(() => parseEnv({ ...valid, REDIS_URL: "not-a-url" })).toThrowError(/REDIS_URL/);
   });

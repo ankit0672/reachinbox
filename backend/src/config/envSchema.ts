@@ -11,6 +11,11 @@ const schema = z.object({
   API_PORT: z.coerce.number().int().positive().default(3001),
   FRONTEND_URL: z.url().default("http://localhost:5173"),
   SENDER_POOL_SIZE: z.coerce.number().int().positive().default(3),
+  // Queue / worker
+  BULLMQ_PREFIX: z.string().min(1).default("reachinbox"),
+  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
+  EMAIL_JOB_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  EMAIL_JOB_BACKOFF_MS: z.coerce.number().int().positive().default(5000),
 });
 
 export type Env = z.infer<typeof schema>;
