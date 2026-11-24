@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
 import type { Worker } from "bullmq";
 import { createEmailQueue } from "../../src/queue/emailQueue.js";
-import { createEmailWorker, type SendFn } from "../../src/queue/emailWorker.js";
+import {
+  createEmailWorker,
+  type EmailWorkerSettings,
+  type SendFn,
+} from "../../src/queue/emailWorker.js";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6380";
 
@@ -25,8 +29,10 @@ export function createTestQueue(opts: { attempts?: number; backoffMs?: number } 
   return {
     prefix,
     queue,
-    startWorker(send: SendFn, concurrency = 5) {
-      const worker = createEmailWorker({ connection, prefix, concurrency, send });
+    connection,
+    /** `extra` adds M5 options (limiter, minDelayMs, onRateLimited); none = no rate limiting. */
+    startWorker(send: SendFn, concurrency = 5, extra: Partial<EmailWorkerSettings> = {}) {
+      const worker = createEmailWorker({ connection, prefix, concurrency, send, ...extra });
       workers.push(worker);
       return worker;
     },
@@ -49,5 +55,17 @@ export async function waitFor<T>(check: () => Promise<T>, timeoutMs = 10_000, ev
     if (value) return value;
     if (Date.now() > deadline) throw new Error(`waitFor timed out after ${timeoutMs}ms`);
     await new Promise((r) => setTimeout(r, everyMs));
+  }
+}
+
+/**
+ * Waits until "now" sits at least `marginMs` inside a rate-limit window, so a
+ * test that assumes "these sends share one window" can't straddle a boundary.
+ */
+export async function untilSafelyInsideWindow(windowMs: number, marginMs: number) {
+  for (;;) {
+    const intoWindow = Date.now() % windowMs;
+    if (intoWindow >= 50 && windowMs - intoWindow >= marginMs) return;
+    await new Promise((r) => setTimeout(r, Math.min(windowMs - intoWindow + 60, 1000)));
   }
 }

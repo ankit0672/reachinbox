@@ -41,6 +41,32 @@ describe("parseEnv", () => {
     );
   });
 
+  it("reads rate-limit settings, where 0 means 'off' for every cap", () => {
+    const env = parseEnv(valid);
+    expect(env.RATE_LIMIT_WINDOW_MS).toBe(3_600_000);
+    expect(env.MAX_EMAILS_PER_HOUR_PER_SENDER).toBe(100);
+    expect(env.MAX_EMAILS_PER_HOUR).toBe(0);
+    expect(env.MIN_DELAY_BETWEEN_SENDS_MS).toBe(2000);
+    expect(env.PLANNING_HORIZON_DAYS).toBe(30);
+    const off = parseEnv({
+      ...valid,
+      MAX_EMAILS_PER_HOUR_PER_SENDER: "0",
+      MAX_EMAILS_PER_HOUR: "0",
+      MIN_DELAY_BETWEEN_SENDS_MS: "0",
+    });
+    expect([
+      off.MAX_EMAILS_PER_HOUR_PER_SENDER,
+      off.MAX_EMAILS_PER_HOUR,
+      off.MIN_DELAY_BETWEEN_SENDS_MS,
+    ]).toEqual([0, 0, 0]);
+    expect(() => parseEnv({ ...valid, MAX_EMAILS_PER_HOUR: "-1" })).toThrowError(
+      /MAX_EMAILS_PER_HOUR/,
+    );
+    expect(() => parseEnv({ ...valid, RATE_LIMIT_WINDOW_MS: "0" })).toThrowError(
+      /RATE_LIMIT_WINDOW_MS/,
+    );
+  });
+
   it("rejects malformed URLs", () => {
     expect(() => parseEnv({ ...valid, REDIS_URL: "not-a-url" })).toThrowError(/REDIS_URL/);
   });

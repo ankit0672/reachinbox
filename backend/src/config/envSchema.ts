@@ -20,6 +20,14 @@ const schema = z.object({
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   EMAIL_JOB_ATTEMPTS: z.coerce.number().int().positive().default(3),
   EMAIL_JOB_BACKOFF_MS: z.coerce.number().int().positive().default(5000),
+  // Rate limiting. Every cap uses 0 = off.
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(3_600_000),
+  MAX_EMAILS_PER_HOUR_PER_SENDER: z.coerce.number().int().min(0).default(100),
+  MAX_EMAILS_PER_HOUR: z.coerce.number().int().min(0).default(0),
+  MIN_DELAY_BETWEEN_SENDS_MS: z.coerce.number().int().min(0).default(2000),
+  RESCHEDULE_SPACING_MS: z.coerce.number().int().min(0).default(1000),
+  PLANNING_HORIZON_DAYS: z.coerce.number().int().positive().default(30),
+  SCHEDULE_TX_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
 });
 
 export type Env = z.infer<typeof schema>;
