@@ -1,0 +1,23 @@
+# secrets / credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+ethereal*.json
+
+# dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+
+# logs and OS/editor noise
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# prisma / local data
+*.db
