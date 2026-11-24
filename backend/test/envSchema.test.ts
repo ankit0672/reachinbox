@@ -23,6 +23,12 @@ describe("parseEnv", () => {
     expect(() => parseEnv({})).toThrowError(/DATABASE_URL[\s\S]*REDIS_URL[\s\S]*ELASTICSEARCH_URL/);
   });
 
+  it("defaults the sender pool to 3 and rejects a non-positive size", () => {
+    expect(parseEnv(valid).SENDER_POOL_SIZE).toBe(3);
+    expect(parseEnv({ ...valid, SENDER_POOL_SIZE: "5" }).SENDER_POOL_SIZE).toBe(5);
+    expect(() => parseEnv({ ...valid, SENDER_POOL_SIZE: "0" })).toThrowError(/SENDER_POOL_SIZE/);
+  });
+
   it("rejects malformed URLs", () => {
     expect(() => parseEnv({ ...valid, REDIS_URL: "not-a-url" })).toThrowError(/REDIS_URL/);
   });

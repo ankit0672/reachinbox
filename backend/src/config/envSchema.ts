@@ -10,6 +10,7 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   API_PORT: z.coerce.number().int().positive().default(3001),
   FRONTEND_URL: z.url().default("http://localhost:5173"),
+  SENDER_POOL_SIZE: z.coerce.number().int().positive().default(3),
 });
 
 export type Env = z.infer<typeof schema>;
