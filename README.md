@@ -46,9 +46,34 @@ curl -X POST localhost:3001/api/schedule \
 
 - Leads are trimmed, lowercased, validated and deduped on the server; the response reports `received / accepted / duplicate / invalid` (client-supplied counts are ignored).
 - `startTime` must include a timezone. A past `startTime` is sent as soon as possible.
-- Lead *i* is scheduled at `startTime + i * delayBetweenMs` and assigned sender *i mod N* (round-robin).
+- `hourlyLimit` is **per sender**: each sender sends at most this many of the campaign's emails per window (so with 3 senders and `hourlyLimit: 50`, the campaign can send up to 150 per hour).
+- Leads are pre-packed into hourly windows at schedule time (see *Rate limiting* below); each email stores its lead position as `seq`.
 - The campaign and all its email rows are written in one transaction; jobs are enqueued only after it commits, in `ENQUEUE_CHUNK_SIZE` batches. If Redis fails part-way, the API answers `503` with how many were queued, and the rows stay `SCHEDULED` for reconciliation to re-queue.
-- Limits from `.env`: `MAX_LEADS_PER_CAMPAIGN`, `MAX_EMAIL_BODY_CHARS`, `ENQUEUE_CHUNK_SIZE`.
+- Limits from `.env`: `MAX_LEADS_PER_CAMPAIGN`, `MAX_EMAIL_BODY_CHARS`, `ENQUEUE_CHUNK_SIZE`, `PLANNING_HORIZON_DAYS` (a plan that would end later is rejected with `400`).
+
+## Rate limiting (M5)
+
+**Ordering.** Every email has one total order: `(scheduledAt, seq, id)`, where `seq` is its lead position in the campaign. What is *guaranteed* is the order of assigned `scheduledAt` values (within a campaign they never decrease with `seq`, at schedule time and after any runtime reschedule). The *actual* send order is approximate when `WORKER_CONCURRENCY > 1`: jobs due close together can finish out of order because SMTP latency varies.
+
+**Windows.** Windows are epoch-aligned: window *n* is `[n·W, (n+1)·W)` with `W = RATE_LIMIT_WINDOW_MS` (default 1h, i.e. UTC hours). Redis keys and the pre-pack SQL use the same math.
+
+**Caps (all `0 = off`), most restrictive wins:**
+
+| Cap | Source | Scope |
+|---|---|---|
+| campaign | `hourlyLimit` in the request | per campaign, **per sender**, per window |
+| sender | `MAX_EMAILS_PER_HOUR_PER_SENDER` | per sender (all campaigns), per window |
+| global | `MAX_EMAILS_PER_HOUR` | all senders, per window |
+
+**1. Pre-packing at schedule time (best effort).** Inside one transaction holding a Postgres advisory lock (so concurrent schedule requests can't book the same capacity), the API counts emails already booked per sender per window across *all* campaigns, then places lead *i* at the first time ≥ previous + `delayBetweenMs` (first slot = `max(startTime, now)`) whose window has room, on the next sender in rotation that has room. The rotation starts at the least-loaded sender, so campaigns don't all start on Sender 1. When every sender is full, the rest of the campaign moves to the next window start and the spacing resumes from there. Nothing is dropped.
+
+**2. Runtime limiter (authoritative).** Before each send the worker runs one Lua script that checks all three counters (`{prefix}:rl:cs:{campaign}:{sender}:{window}`, `rl:s:{sender}:{window}`, `rl:g:{window}`, TTL two windows) and increments them only if all pass, atomically, so any number of workers can't exceed a cap. An over-limit email does **not** count as a failed attempt and never touches SMTP: its row goes back to `SCHEDULED` with a new `scheduledAt` at the next window start + rank × `RESCHEDULE_SPACING_MS` (rank is handed out in the order jobs hit the limit, keeping earlier emails earlier), and the BullMQ job is moved there with `moveToDelayed` + `DelayedError`. A failed SMTP send refunds exactly the counter keys it took.
+
+Pre-packing is only a best-effort plan; the runtime limiter is what enforces the caps. Sends drift from the plan because of the global min delay, SMTP latency, worker downtime and retries, so an email planned near the end of a window can land in the next one, where the runtime limiter may push it again.
+
+**3. Global minimum delay.** `MIN_DELAY_BETWEEN_SENDS_MS` (default 2000) is a BullMQ worker limiter (`max: 1` per duration) whose state lives in Redis, so it holds across all workers. The effective gap between sends is at least `max(delayBetweenMs, MIN_DELAY_BETWEEN_SENDS_MS)` and total throughput is capped at `3600000 / MIN_DELAY_BETWEEN_SENDS_MS` per hour (1800/h at 2000 ms). Lower it for the load demo.
+
+**Trade-offs.** Fixed windows allow a burst of up to 2× a cap around a window boundary (e.g. N at 10:59 and N at 11:00). Window keys use each worker's clock, so worker hosts need synced clocks. If Redis is wiped mid-window, that window's counters restart at 0 (M6's reconcile reseeds them from `SENT` rows). Schedule requests are serialised by the advisory lock.
 
 ## Sending pipeline (so far)
 

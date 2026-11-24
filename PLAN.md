@@ -243,6 +243,7 @@ Document in README and demonstrate with a small config (e.g., hourly limit 5, de
 ### M6. Persistence and reconciliation
 - `reconcile.ts` on worker boot.
 - ✅ Verify: schedule emails 2 minutes out → kill API + worker → restart → they still send once. Then `FLUSHALL` Redis → restart worker → reconcile restores jobs. Assert no duplicates.
+- Note (from M5): reconcile must also **reseed this window's Redis rate-limit counters** (`rl:cs`, `rl:s`, `rl:g` for the current window) from the `SENT` rows in the DB whose `sentAt` falls in the current window, so a wiped Redis can't let a sender exceed its cap for the rest of the window.
 
 ### M7. Bull Board + Elasticsearch
 - Mount bull-board with auth. ES index/update/search + reindex script.
