@@ -1,9 +1,11 @@
 import request from "supertest";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/db/prisma.js";
+import { Prisma } from "../src/generated/prisma/client.js";
 import { createDevUserMiddleware } from "../src/middleware/devUser.js";
 import type { EmailQueue } from "../src/queue/emailQueue.js";
+import type { PlanningSettings } from "../src/routes/schedule.js";
 import { resetDb, seedSenders } from "./helpers/seed.js";
 import { createTestQueue } from "./helpers/testQueue.js";
 
@@ -13,8 +15,12 @@ const USER = "owner@example.com";
 
 let env: ReturnType<typeof createTestQueue>;
 
-function appWith(queue: Pick<EmailQueue, "addBulk"> = env.queue, enqueueChunkSize = 500) {
-  return createApp(checks, { schedule: { emailQueue: queue, enqueueChunkSize } });
+function appWith(
+  queue: Pick<EmailQueue, "addBulk"> = env.queue,
+  enqueueChunkSize = 500,
+  planning: Partial<PlanningSettings> = {},
+) {
+  return createApp(checks, { schedule: { emailQueue: queue, enqueueChunkSize, planning } });
 }
 
 function validBody(overrides: Record<string, unknown> = {}) {
@@ -52,6 +58,55 @@ describe("dev user middleware (TODO(M8): replaced by Google auth)", () => {
 
   it("refuses to be created when NODE_ENV=production", () => {
     expect(() => createDevUserMiddleware("production")).toThrow(/production/);
+  });
+
+  it("survives concurrent first requests for a brand-new user (upsert race)", async () => {
+    // Called directly (no HTTP) so the 20 upserts really overlap.
+    const middleware = createDevUserMiddleware("test");
+    const outcomes = await Promise.all(
+      Array.from({ length: 20 }, () => {
+        const req = { header: () => "fresh@example.com" } as unknown as Parameters<
+          typeof middleware
+        >[0];
+        const res = { status: () => ({ json: () => {} }) } as unknown as Parameters<
+          typeof middleware
+        >[1];
+        return new Promise<string>((resolve) => {
+          Promise.resolve(middleware(req, res, () => resolve(req.user ? "ok" : "no user"))).catch(
+            (err: Error) => resolve(`error: ${err.message.split("\n").pop()}`),
+          );
+        });
+      }),
+    );
+    expect(outcomes).toEqual(Array(20).fill("ok"));
+    expect(await prisma.user.count({ where: { email: "fresh@example.com" } })).toBe(1);
+  });
+
+  it("recovers deterministically when it loses the user-creation race (P2002)", async () => {
+    let winnerId = "";
+    const spy = vi.spyOn(prisma.user, "upsert").mockImplementationOnce((async () => {
+      // Another request creates the same user first, then our insert hits the unique key.
+      winnerId = (
+        await prisma.user.create({
+          data: { googleId: "dev:racer@example.com", email: "racer@example.com", name: "racer" },
+        })
+      ).id;
+      throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+        code: "P2002",
+        clientVersion: "test",
+      });
+    }) as never);
+
+    const middleware = createDevUserMiddleware("test");
+    const req = { header: () => "racer@example.com" } as unknown as Parameters<
+      typeof middleware
+    >[0];
+    const res = {} as Parameters<typeof middleware>[1];
+    await new Promise<void>((resolve, reject) => {
+      Promise.resolve(middleware(req, res, () => resolve())).catch(reject);
+    });
+    spy.mockRestore();
+    expect(req.user?.id).toBe(winnerId);
   });
 
   it("upserts the user from the header", async () => {
@@ -196,5 +251,65 @@ describe("enqueue failure after commit", () => {
     expect(rows).toHaveLength(5);
     expect(rows.every((r) => r.status === "SCHEDULED")).toBe(true);
     expect(await env.queue.getJobCounts("delayed")).toEqual({ delayed: 2 });
+  });
+});
+
+describe("pre-packing through the API (M5)", () => {
+  const H = 3_600_000;
+
+  it("stores seq as the lead position", async () => {
+    const res = await post(validBody({ delayBetweenMs: 0 }));
+    const rows = await prisma.email.findMany({
+      where: { campaignId: res.body.campaignId },
+      orderBy: [{ scheduledAt: "asc" }, { seq: "asc" }, { id: "asc" }],
+    });
+    expect(rows.map((r) => [r.seq, r.toEmail])).toEqual([
+      [0, "a@example.com"],
+      [1, "b@example.com"],
+      [2, "c@example.com"],
+    ]);
+  });
+
+  it("plans a past startTime against the current window (first slot = now)", async () => {
+    const before = Date.now();
+    const res = await post(
+      validBody({ startTime: new Date(before - 2 * H).toISOString(), delayBetweenMs: 0 }),
+    );
+    const rows = await prisma.email.findMany({ where: { campaignId: res.body.campaignId } });
+    expect(rows.every((r) => r.scheduledAt.getTime() >= before)).toBe(true);
+    expect(rows.every((r) => r.scheduledAt.getTime() <= Date.now())).toBe(true);
+  });
+
+  it("two concurrent requests never overbook a sender window", async () => {
+    const app = appWith(env.queue, 500, { perSenderCap: 2 });
+    const body = (tag: string) =>
+      validBody({
+        leads: Array.from({ length: 6 }, (_, i) => `${tag}${i}@example.com`),
+        delayBetweenMs: 0,
+        hourlyLimit: 50,
+      });
+    const [r1, r2] = await Promise.all([post(body("x"), app), post(body("y"), app)]);
+    expect([r1.status, r2.status]).toEqual([201, 201]);
+
+    const rows = await prisma.email.findMany();
+    expect(rows).toHaveLength(12);
+    const perSenderWindow = new Map<string, number>();
+    const perSender = new Map<string, number>();
+    for (const r of rows) {
+      const k = `${r.senderId}:${Math.floor(r.scheduledAt.getTime() / H)}`;
+      perSenderWindow.set(k, (perSenderWindow.get(k) ?? 0) + 1);
+      perSender.set(r.senderId, (perSender.get(r.senderId) ?? 0) + 1);
+    }
+    expect(Math.max(...perSenderWindow.values())).toBeLessThanOrEqual(2);
+    expect([...perSender.values()]).toEqual([4, 4, 4]); // balanced across the 3 senders
+  });
+
+  it("returns 400 when the plan would exceed the planning horizon", async () => {
+    const app = appWith(env.queue, 500, { horizonMs: 2 * H });
+    const leads = Array.from({ length: 10 }, (_, i) => `h${i}@example.com`);
+    const res = await post(validBody({ leads, hourlyLimit: 1, delayBetweenMs: 0 }), app);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/horizon/i);
+    expect(await prisma.campaign.count()).toBe(0);
   });
 });

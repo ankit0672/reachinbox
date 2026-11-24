@@ -2,13 +2,30 @@ import { Router } from "express";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { EnqueueError, enqueueEmails, type EmailQueue } from "../queue/emailQueue.js";
-import { normalizeLeads, planEmails, saveCampaign } from "../services/scheduleService.js";
-import { listSenders } from "../services/senderService.js";
+import {
+  NoSendersError,
+  PlanningHorizonError,
+  normalizeLeads,
+  scheduleCampaign,
+  type PlanningSettings,
+} from "../services/scheduleService.js";
+
+export type { PlanningSettings };
 
 export interface ScheduleDeps {
   emailQueue: Pick<EmailQueue, "addBulk">;
   enqueueChunkSize: number;
+  /** Overrides for tests; defaults come from .env. */
+  planning?: Partial<PlanningSettings>;
 }
+
+const planningFromEnv = (): PlanningSettings => ({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  perSenderCap: env.MAX_EMAILS_PER_HOUR_PER_SENDER,
+  globalCap: env.MAX_EMAILS_PER_HOUR,
+  horizonMs: env.PLANNING_HORIZON_DAYS * 86_400_000,
+  txTimeoutMs: env.SCHEDULE_TX_TIMEOUT_MS,
+});
 
 const scheduleSchema = z.object({
   subject: z.string().trim().min(1, "subject is required").max(300),
@@ -20,6 +37,7 @@ const scheduleSchema = z.object({
     .int()
     .min(0)
     .max(24 * 3600 * 1000),
+  // Per sender: each sender sends at most this many of the campaign's emails per window.
   hourlyLimit: z.number().int().positive().max(100_000),
   leads: z
     .array(z.string().max(320))
@@ -32,6 +50,7 @@ const MAX_INVALID_ECHO = 50;
 
 export function createScheduleRouter(deps: ScheduleDeps): Router {
   const router = Router();
+  const planning = { ...planningFromEnv(), ...deps.planning };
 
   router.post("/", async (req, res) => {
     const parsed = scheduleSchema.safeParse(req.body);
@@ -61,14 +80,26 @@ export function createScheduleRouter(deps: ScheduleDeps): Router {
       return;
     }
 
-    const senders = await listSenders();
-    if (senders.length === 0) {
-      res.status(503).json({ error: "No senders configured yet; try again shortly" });
-      return;
+    let campaignId: string;
+    let planned: Awaited<ReturnType<typeof scheduleCampaign>>["planned"];
+    try {
+      ({ campaignId, planned } = await scheduleCampaign(
+        req.user!.id,
+        input,
+        report.accepted,
+        planning,
+      ));
+    } catch (err) {
+      if (err instanceof PlanningHorizonError) {
+        res.status(400).json({ error: err.message, leads: leadSummary });
+        return;
+      }
+      if (err instanceof NoSendersError) {
+        res.status(503).json({ error: "No senders configured yet; try again shortly" });
+        return;
+      }
+      throw err;
     }
-
-    const planned = planEmails(report.accepted, input, senders);
-    const campaignId = await saveCampaign(req.user!.id, input, planned);
 
     // Enqueue only after the commit. If Redis fails part-way, the rows stay
     // SCHEDULED in Postgres (the source of truth) and are not rolled back.

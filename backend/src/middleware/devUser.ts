@@ -20,13 +20,25 @@ export function createDevUserMiddleware(nodeEnv: string = env.NODE_ENV): Request
       return;
     }
 
-    const googleId = `dev:${email}`;
-    const user = await prisma.user.upsert({
+    const user = await upsertDevUser(email);
+    req.user = { id: user.id, email: user.email, name: user.name };
+    next();
+  };
+}
+
+// Prisma's upsert is find-then-create here, so two concurrent first requests
+// for the same new user can both try the insert. The loser gets P2002 and
+// simply reads the row the winner created.
+async function upsertDevUser(email: string) {
+  const googleId = `dev:${email}`;
+  try {
+    return await prisma.user.upsert({
       where: { googleId },
       update: {},
       create: { googleId, email, name: email.split("@")[0] ?? email },
     });
-    req.user = { id: user.id, email: user.email, name: user.name };
-    next();
-  };
+  } catch (err) {
+    if ((err as { code?: string }).code !== "P2002") throw err;
+    return prisma.user.findUniqueOrThrow({ where: { googleId } });
+  }
 }
