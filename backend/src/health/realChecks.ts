@@ -1,11 +1,11 @@
-import { pool } from "../db/pool.js";
+import { prisma } from "../db/prisma.js";
 import { redis } from "../redis/connection.js";
 import { esClient } from "../search/client.js";
 import type { HealthChecks } from "../routes/health.js";
 
 export const realHealthChecks: HealthChecks = {
   database: async () => {
-    await pool.query("SELECT 1");
+    await prisma.$queryRaw`SELECT 1`;
   },
   redis: async () => {
     await redis.ping();
@@ -16,5 +16,5 @@ export const realHealthChecks: HealthChecks = {
 };
 
 export async function closeInfraClients(): Promise<void> {
-  await Promise.allSettled([pool.end(), redis.quit(), esClient.close()]);
+  await Promise.allSettled([prisma.$disconnect(), redis.quit(), esClient.close()]);
 }

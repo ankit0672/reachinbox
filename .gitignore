@@ -21,3 +21,6 @@ coverage/
 
 # prisma / local data
 *.db
+
+# generated Prisma client (rebuilt by `npm run db:generate` / postinstall)
+backend/src/generated/

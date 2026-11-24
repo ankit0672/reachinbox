@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  googleId  String   @unique
+  email     String
+  name      String
+  avatarUrl String?
+  createdAt DateTime @default(now())
+
+  campaigns Campaign[]
+  emails    Email[]
+  slack     SlackConnection?
+}
+
+/// Ethereal SMTP accounts, shared pool across all users. Passwords are
+/// plaintext on purpose: they are throwaway fake-inbox credentials.
+model Sender {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  smtpHost  String
+  smtpPort  Int
+  smtpUser  String
+  smtpPass  String
+  label     String
+  createdAt DateTime @default(now())
+
+  emails Email[]
+}
+
+model Campaign {
+  id             String   @id @default(uuid())
+  userId         String
+  subject        String
+  body           String
+  startTime      DateTime
+  delayBetweenMs Int
+  hourlyLimit    Int
+  totalCount     Int
+  createdAt      DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails Email[]
+}
+
+enum EmailStatus {
+  SCHEDULED
+  PROCESSING
+  SENT
+  FAILED
+}
+
+model Email {
+  id           String      @id @default(uuid())
+  campaignId   String
+  userId       String
+  senderId     String
+  toEmail      String
+  subject      String
+  body         String
+  scheduledAt  DateTime
+  status       EmailStatus @default(SCHEDULED)
+  sentAt       DateTime?
+  messageId    String?
+  previewUrl   String?
+  attempts     Int         @default(0)
+  errorMessage String?
+  createdAt    DateTime    @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sender   Sender   @relation(fields: [senderId], references: [id])
+
+  @@unique([campaignId, toEmail])
+  @@index([userId, status, scheduledAt])
+  @@index([status, scheduledAt])
+}
+
+model SlackConnection {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  teamId     String
+  teamName   String
+  /// AES-256-GCM ciphertext (iv:tag:data), never the raw token.
+  botToken   String
+  channelId  String?
+  webhookUrl String?
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
