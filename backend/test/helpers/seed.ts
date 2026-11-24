@@ -58,3 +58,21 @@ export async function seedEmail(
 export function getEmail(id: string) {
   return prisma.email.findUniqueOrThrow({ where: { id } });
 }
+
+/** Inserts `n` fake senders (labels "Sender 1".."Sender n") in a stable order. */
+export async function seedSenders(n: number) {
+  for (let i = 1; i <= n; i++) {
+    await prisma.sender.create({
+      data: {
+        email: `sender${i}@ethereal.test`,
+        smtpHost: "smtp.ethereal.email",
+        smtpPort: 587,
+        smtpUser: `sender${i}@ethereal.test`,
+        smtpPass: "secret",
+        label: `Sender ${i}`,
+        createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, i)),
+      },
+    });
+  }
+  return prisma.sender.findMany({ orderBy: { createdAt: "asc" } });
+}

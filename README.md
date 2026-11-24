@@ -33,6 +33,23 @@ npm test                      # vitest; needs compose up
 
 Tests use their own BullMQ key prefix (`reachinbox-test-<uuid>`) and delete every key under it afterwards, so they never touch dev jobs under `reachinbox:`.
 
+## Schedule API (so far)
+
+Until Google login lands (M8), `/api/*` identifies the user with a **dev-only** `X-Dev-User-Email` header (the middleware refuses to start when `NODE_ENV=production`).
+
+```bash
+curl -X POST localhost:3001/api/schedule \
+  -H 'Content-Type: application/json' -H 'X-Dev-User-Email: you@example.com' \
+  -d '{"subject":"Hi","body":"Hello","startTime":"2026-12-01T10:00:00Z",
+       "delayBetweenMs":2000,"hourlyLimit":50,"leads":["a@example.com","b@example.com"]}'
+```
+
+- Leads are trimmed, lowercased, validated and deduped on the server; the response reports `received / accepted / duplicate / invalid` (client-supplied counts are ignored).
+- `startTime` must include a timezone. A past `startTime` is sent as soon as possible.
+- Lead *i* is scheduled at `startTime + i * delayBetweenMs` and assigned sender *i mod N* (round-robin).
+- The campaign and all its email rows are written in one transaction; jobs are enqueued only after it commits, in `ENQUEUE_CHUNK_SIZE` batches. If Redis fails part-way, the API answers `503` with how many were queued, and the rows stay `SCHEDULED` for reconciliation to re-queue.
+- Limits from `.env`: `MAX_LEADS_PER_CAMPAIGN`, `MAX_EMAIL_BODY_CHARS`, `ENQUEUE_CHUNK_SIZE`.
+
 ## Sending pipeline (so far)
 
 - **One row, one job, one send.** Each `Email` row is enqueued with `jobId = email.id` and a delay of `scheduledAt - now`, so adding it twice is a no-op.

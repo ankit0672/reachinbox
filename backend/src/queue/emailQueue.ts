@@ -41,9 +41,48 @@ export function enqueueEmail(
   email: { id: string; scheduledAt: Date },
   now = Date.now(),
 ): Promise<Job<EmailJobData>> {
-  return queue.add(
-    "send",
-    { emailId: email.id },
-    { jobId: email.id, delay: Math.max(0, email.scheduledAt.getTime() - now) },
-  );
+  const job = toJob(email, now);
+  return queue.add(job.name, job.data, job.opts);
+}
+
+// A past scheduledAt gives delay 0: send as soon as possible.
+function toJob(email: { id: string; scheduledAt: Date }, now: number) {
+  return {
+    name: "send",
+    data: { emailId: email.id },
+    opts: { jobId: email.id, delay: Math.max(0, email.scheduledAt.getTime() - now) },
+  };
+}
+
+export class EnqueueError extends Error {
+  constructor(
+    readonly queued: number,
+    readonly total: number,
+    cause: unknown,
+  ) {
+    super(`Queued ${queued} of ${total} emails before failing`, { cause });
+  }
+}
+
+/**
+ * Adds jobs in chunks with addBulk so a 1000+ lead campaign is a few Redis
+ * round trips, not one per email. On failure, reports how many made it.
+ */
+export async function enqueueEmails(
+  queue: Pick<EmailQueue, "addBulk">,
+  emails: { id: string; scheduledAt: Date }[],
+  chunkSize: number,
+): Promise<number> {
+  let queued = 0;
+  for (let i = 0; i < emails.length; i += chunkSize) {
+    const chunk = emails.slice(i, i + chunkSize);
+    const now = Date.now();
+    try {
+      await queue.addBulk(chunk.map((email) => toJob(email, now)));
+    } catch (err) {
+      throw new EnqueueError(queued, emails.length, err);
+    }
+    queued += chunk.length;
+  }
+  return queued;
 }

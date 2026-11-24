@@ -11,6 +11,10 @@ const schema = z.object({
   API_PORT: z.coerce.number().int().positive().default(3001),
   FRONTEND_URL: z.url().default("http://localhost:5173"),
   SENDER_POOL_SIZE: z.coerce.number().int().positive().default(3),
+  // Schedule API
+  MAX_LEADS_PER_CAMPAIGN: z.coerce.number().int().positive().default(10_000),
+  MAX_EMAIL_BODY_CHARS: z.coerce.number().int().positive().default(20_000),
+  ENQUEUE_CHUNK_SIZE: z.coerce.number().int().positive().default(500),
   // Queue / worker
   BULLMQ_PREFIX: z.string().min(1).default("reachinbox"),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
