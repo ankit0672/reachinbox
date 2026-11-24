@@ -1,5 +1,5 @@
-// Dev-only stand-in for the schedule API (which arrives in M4): inserts
-// email rows for a demo user and enqueues them on the dev queue.
+// Dev-only: inserts email rows directly (bypassing the API's pre-packing) and
+// enqueues them on the dev queue. Handy for exercising the runtime limiter.
 // Usage: npm run seed:emails -- [count=1] [delayMs=5000]
 import { env } from "../config/env.js";
 import { prisma } from "../db/prisma.js";
@@ -44,6 +44,7 @@ for (let i = 0; i < count; i++) {
       campaignId: campaign.id,
       userId: user.id,
       senderId: senders[i % senders.length]!.id,
+      seq: i,
       toEmail: `lead${i + 1}@example.com`,
       subject,
       body: campaign.body,

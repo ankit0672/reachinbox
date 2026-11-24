@@ -46,6 +46,7 @@ export async function seedEmail(
       campaignId: campaign.id,
       userId: user.id,
       senderId: sender.id,
+      seq: 0,
       toEmail: overrides.toEmail ?? "lead@example.com",
       subject: "Hello",
       body: "Body",
@@ -75,4 +76,50 @@ export async function seedSenders(n: number) {
     });
   }
   return prisma.sender.findMany({ orderBy: { createdAt: "asc" } });
+}
+
+/** One campaign with `count` emails (seq 0..count-1), all due at `scheduledAt`, round-robin over `senders`. */
+export async function seedCampaign(opts: {
+  count: number;
+  hourlyLimit: number;
+  scheduledAt?: Date;
+  senderCount?: number;
+}) {
+  const senders = await seedSenders(opts.senderCount ?? 1);
+  const user = await prisma.user.upsert({
+    where: { googleId: "test-google-id" },
+    update: {},
+    create: { googleId: "test-google-id", email: "owner@example.com", name: "Test Owner" },
+  });
+  const scheduledAt = opts.scheduledAt ?? new Date(Date.now() - 1000);
+  const campaign = await prisma.campaign.create({
+    data: {
+      userId: user.id,
+      subject: "Load",
+      body: "Body",
+      startTime: scheduledAt,
+      delayBetweenMs: 0,
+      hourlyLimit: opts.hourlyLimit,
+      totalCount: opts.count,
+    },
+  });
+  for (let seq = 0; seq < opts.count; seq++) {
+    await prisma.email.create({
+      data: {
+        campaignId: campaign.id,
+        userId: user.id,
+        senderId: senders[seq % senders.length]!.id,
+        seq,
+        toEmail: `lead${seq}@example.com`,
+        subject: "Load",
+        body: "Body",
+        scheduledAt,
+      },
+    });
+  }
+  const emails = await prisma.email.findMany({
+    where: { campaignId: campaign.id },
+    orderBy: [{ scheduledAt: "asc" }, { seq: "asc" }, { id: "asc" }],
+  });
+  return { campaign, senders, user, emails };
 }

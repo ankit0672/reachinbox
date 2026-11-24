@@ -62,6 +62,8 @@ model Email {
   campaignId   String
   userId       String
   senderId     String
+  /// 0-based lead position within the campaign; ordering key is (scheduledAt, seq, id).
+  seq          Int
   toEmail      String
   subject      String
   body         String
@@ -79,8 +81,10 @@ model Email {
   sender   Sender   @relation(fields: [senderId], references: [id])
 
   @@unique([campaignId, toEmail])
+  @@unique([campaignId, seq])
   @@index([userId, status, scheduledAt])
   @@index([status, scheduledAt])
+  @@index([senderId, scheduledAt])
 }
 
 model SlackConnection {
