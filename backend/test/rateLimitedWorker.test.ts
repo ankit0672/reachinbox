@@ -147,7 +147,8 @@ describe("runtime hourly limit", () => {
     expect(Math.max(...perWindow.values())).toBeLessThanOrEqual(3);
     const seqById = new Map(emails.map((e) => [e.id, e.seq]));
     expect(sentAt.map((s) => seqById.get(s.emailId))).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
-    expect((await rows(campaign.id)).every((e) => e.status === "SENT")).toBe(true);
+    // The fake send records before the worker writes SENT, so wait for the DB to catch up.
+    await waitFor(async () => (await rows(campaign.id)).every((e) => e.status === "SENT"));
   }, 20_000);
 });
 
