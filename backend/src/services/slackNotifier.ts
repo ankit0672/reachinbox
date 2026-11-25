@@ -13,10 +13,12 @@ export interface SlackNotifierDeps {
   windowMs: number;
 }
 
+const emails = (n: number) => `${n} ${n === 1 ? "email" : "emails"}`;
+
 const LIMIT_TEXT: Record<RateLimitEvent["blockedBy"], (n: number) => string> = {
-  campaign: (n) => `this campaign's limit of ${n} emails per sender per hour`,
-  sender: (n) => `the sender limit of ${n} emails per hour`,
-  global: (n) => `the global limit of ${n} emails per hour`,
+  campaign: (n) => `this campaign's limit of ${emails(n)} per sender per hour`,
+  sender: (n) => `the sender limit of ${emails(n)} per hour`,
+  global: (n) => `the global limit of ${emails(n)} per hour`,
 };
 
 const utc = (d: Date) => `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;

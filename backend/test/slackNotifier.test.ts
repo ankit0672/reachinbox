@@ -5,7 +5,7 @@ import { enqueueEmails } from "../src/queue/emailQueue.js";
 import type { SendFn } from "../src/queue/emailWorker.js";
 import { HourlyLimiter } from "../src/rateLimit/hourlyLimiter.js";
 import type { RateLimitEvent } from "../src/services/rateLimitNotifier.js";
-import { createSlackNotifier } from "../src/services/slackNotifier.js";
+import { createSlackNotifier, rateLimitMessage } from "../src/services/slackNotifier.js";
 import { SlackApi } from "../src/slack/slackApi.js";
 import { startFakeSlack } from "./helpers/fakeSlack.js";
 import { resetDb, seedCampaign } from "./helpers/seed.js";
@@ -69,6 +69,16 @@ afterEach(async () => {
   await env.cleanup();
 });
 afterAll(() => prisma.$disconnect());
+
+describe("rateLimitMessage wording", () => {
+  it("says '1 email' for a limit of 1 and 'N emails' otherwise", () => {
+    expect(rateLimitMessage(event({ limit: 1 }))).toMatch(/limit of 1 email per sender per hour/);
+    expect(rateLimitMessage(event({ blockedBy: "global", limit: 1 }))).toMatch(
+      /limit of 1 email per hour/,
+    );
+    expect(rateLimitMessage(event({ limit: 3 }))).toMatch(/limit of 3 emails per sender/);
+  });
+});
 
 describe("Slack rate-limit notifier", () => {
   it("not connected: no Slack call, no crash, logged once per sender per window", async () => {
