@@ -259,14 +259,26 @@ Document in README and demonstrate with a small config (e.g., hourly limit 5, de
 
 ### M10. Frontend foundation
 - Vite + Tailwind, router, typed API client (`credentials: 'include'`), TanStack Query, auth guard, login page, header with name/email/avatar/logout. Get Figma assets first.
+- **Same origin from day one:** the frontend calls relative `/api/...` URLs, and in dev Vite proxies `/api` (and `/admin`) to the API, so the browser only ever talks to one origin. Production (M13) serves the frontend and `/api` from one origin behind Caddy, so nothing changes at deploy time (the session cookie stays first-party `SameSite=Lax`).
 - ✅ Verify: Google login redirects to the dashboard and the header shows real user data.
 
 ### M11. Dashboard, tables, compose
+- Same-origin rule from M10 applies: relative `/api` URLs only, no hard-coded API host.
 - Reusable UI kit (`Button`, `Input`, `Modal`, `Table`, `Tabs`, `Spinner`, `EmptyState`, `Toast`). Scheduled/Sent tables with loading, empty, and error states. Compose modal: subject, body, CSV/TXT upload (papaparse → email count preview, invalid/duplicate counts), start time, delay, hourly limit. "Connect Slack" button + status.
 - ✅ Verify: schedule 5 emails from the UI → they appear in Scheduled → move to Sent with status; Slack connect flow works from the UI.
 
 ### M12. Polish, README, demo
 - Match Figma pixel details. README (see section 8). Seed/demo script for the load scenario. Record the video. Grant repo access, fill the form.
+
+### M13. Deploy (only when the user asks)
+The submission also needs a hosted URL. M9 to M12 stay local; this milestone deploys the same stack.
+- One VPS running the docker compose stack. Frontend and `/api` on the **same origin** behind **Caddy** (automatic HTTPS).
+- **Postgres, Redis and Elasticsearch on the internal Docker network only.** Only Caddy publishes ports 80/443.
+- **Dockerfiles** for the API, the worker and the frontend (static build served by Caddy). A **production compose file** with Redis AOF, named volumes, and automatic restarts (`restart: unless-stopped`).
+- A **production `.env`** with fresh `JWT_SECRET`, `ENCRYPTION_KEY` and `BULL_BOARD_PASS` (never the dev or `.env.example` values). **Nothing secret is committed.**
+- Google OAuth client set to *In production* with `https://<domain>/api/auth/google/callback`; Slack app redirect URL `https://<domain>/api/slack/callback`.
+- A **smoke-test script** for the live URL (health, auth redirect, 401 on protected routes, Bull Board auth).
+- ✅ Verify: the smoke test passes against the live URL; log in, schedule, see it sent; restart the stack on the server and confirm nothing is lost.
 
 ---
 
