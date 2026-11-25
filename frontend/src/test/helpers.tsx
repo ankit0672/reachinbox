@@ -1,10 +1,11 @@
 import { render } from "@testing-library/react";
 import type React from "react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { vi } from "vitest";
 import type { EmailListItem } from "../api/types";
 import { AppProviders } from "../app/AppProviders";
 import { AppRoutes } from "../app/AppRoutes";
+import { LocationProbe } from "./LocationProbe";
 
 type Handler = (init: RequestInit | undefined, url: URL) => Response | Promise<Response>;
 
@@ -38,12 +39,6 @@ export const ME = {
   email: "oliver.brown@domain.io",
   avatarUrl: "https://lh3.googleusercontent.com/a/oliver",
 };
-
-/** Exposes the router's current URL to tests as data-testid="location". */
-function LocationProbe() {
-  const { pathname, search } = useLocation();
-  return <output data-testid="location" hidden>{`${pathname}${search}`}</output>;
-}
 
 /** Renders the real routes and providers at a given URL. */
 export function renderApp(path: string) {
