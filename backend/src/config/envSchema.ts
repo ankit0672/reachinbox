@@ -28,12 +28,31 @@ const schema = z.object({
   RESCHEDULE_SPACING_MS: z.coerce.number().int().min(0).default(1000),
   PLANNING_HORIZON_DAYS: z.coerce.number().int().positive().default(30),
   SCHEDULE_TX_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+  // Crash recovery (worker boot reconcile)
+  SMTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  STALE_PROCESSING_MS: z.coerce.number().int().positive().default(600_000),
+  RECONCILE_CHUNK_SIZE: z.coerce.number().int().positive().default(500),
+  RECONCILE_LOCK_MS: z.coerce.number().int().positive().default(60_000),
+});
+
+// BullMQ's default job lock is 30s; a send can take up to connect + greeting +
+// socket timeouts. A PROCESSING row younger than that may still be mid-send.
+const BULLMQ_LOCK_MS = 30_000;
+const checked = schema.superRefine((env, ctx) => {
+  const minStale = 3 * env.SMTP_TIMEOUT_MS + BULLMQ_LOCK_MS;
+  if (env.STALE_PROCESSING_MS < minStale) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["STALE_PROCESSING_MS"],
+      message: `must be at least 3 x SMTP_TIMEOUT_MS + ${BULLMQ_LOCK_MS}ms (${minStale}ms), or live sends could be reset`,
+    });
+  }
 });
 
 export type Env = z.infer<typeof schema>;
 
 export function parseEnv(source: Record<string, string | undefined>): Env {
-  const result = schema.safeParse(source);
+  const result = checked.safeParse(source);
   if (result.success) return result.data;
 
   const problems = result.error.issues

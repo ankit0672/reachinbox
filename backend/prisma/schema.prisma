@@ -69,6 +69,8 @@ model Email {
   body         String
   scheduledAt  DateTime
   status       EmailStatus @default(SCHEDULED)
+  /// When a worker last claimed the row (SCHEDULED -> PROCESSING); used to spot stale claims.
+  claimedAt    DateTime?
   sentAt       DateTime?
   messageId    String?
   previewUrl   String?

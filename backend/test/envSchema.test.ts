@@ -67,6 +67,20 @@ describe("parseEnv", () => {
     );
   });
 
+  it("reads reconcile and SMTP timeout settings", () => {
+    const env = parseEnv(valid);
+    expect(env.STALE_PROCESSING_MS).toBe(600_000);
+    expect(env.RECONCILE_CHUNK_SIZE).toBe(500);
+    expect(env.RECONCILE_LOCK_MS).toBe(60_000);
+    expect(env.SMTP_TIMEOUT_MS).toBe(30_000);
+  });
+
+  it("rejects a stale threshold that is not safely above the SMTP timeout", () => {
+    expect(() =>
+      parseEnv({ ...valid, SMTP_TIMEOUT_MS: "60000", STALE_PROCESSING_MS: "120000" }),
+    ).toThrowError(/STALE_PROCESSING_MS/);
+  });
+
   it("rejects malformed URLs", () => {
     expect(() => parseEnv({ ...valid, REDIS_URL: "not-a-url" })).toThrowError(/REDIS_URL/);
   });

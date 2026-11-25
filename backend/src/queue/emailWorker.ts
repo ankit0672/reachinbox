@@ -33,7 +33,7 @@ export async function processEmail(emailId: string, deps: ProcessDeps): Promise<
   // Anyone else (duplicate job, second worker, stalled re-run) gets 0 rows and stops here.
   const claimed = await prisma.$queryRaw<{ id: string }[]>`
     UPDATE "Email"
-    SET status = 'PROCESSING'::"EmailStatus"
+    SET status = 'PROCESSING'::"EmailStatus", "claimedAt" = (now() AT TIME ZONE 'UTC')
     WHERE id = ${emailId} AND status = 'SCHEDULED'::"EmailStatus" AND "sentAt" IS NULL
     RETURNING id`;
   if (claimed.length === 0) return "skipped";

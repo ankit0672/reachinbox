@@ -1,4 +1,5 @@
 import nodemailer, { type Transporter } from "nodemailer";
+import { env } from "../config/env.js";
 import type { Sender } from "../generated/prisma/client.js";
 
 // One pooled SMTP transport per sender, created lazily and reused.
@@ -13,6 +14,11 @@ function transportFor(sender: Sender): Transporter {
       port: sender.smtpPort,
       secure: sender.smtpPort === 465,
       auth: { user: sender.smtpUser, pass: sender.smtpPass },
+      // Bounded (nodemailer's socket default is 10 min) so a hung send can't
+      // outlive STALE_PROCESSING_MS and be mistaken for a crashed one.
+      connectionTimeout: env.SMTP_TIMEOUT_MS,
+      greetingTimeout: env.SMTP_TIMEOUT_MS,
+      socketTimeout: env.SMTP_TIMEOUT_MS,
     });
     transports.set(sender.id, transport);
   }
