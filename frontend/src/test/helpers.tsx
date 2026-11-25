@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import type React from "react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { vi } from "vitest";
 import type { EmailListItem } from "../api/types";
 import { AppProviders } from "../app/AppProviders";
@@ -39,12 +39,19 @@ export const ME = {
   avatarUrl: "https://lh3.googleusercontent.com/a/oliver",
 };
 
+/** Exposes the router's current URL to tests as data-testid="location". */
+function LocationProbe() {
+  const { pathname, search } = useLocation();
+  return <output data-testid="location" hidden>{`${pathname}${search}`}</output>;
+}
+
 /** Renders the real routes and providers at a given URL. */
 export function renderApp(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <AppProviders>
         <AppRoutes />
+        <LocationProbe />
       </AppProviders>
     </MemoryRouter>,
   );
@@ -74,6 +81,7 @@ export function dashboardRoutes(
 ) {
   return {
     "GET /api/auth/me": () => json(200, ME),
+    "GET /api/slack/status": () => json(200, { available: true, connected: false }),
     "GET /api/emails": (_init: RequestInit | undefined, url: URL) => {
       const status = url.searchParams.get("status") === "sent" ? "sent" : "scheduled";
       const page = Number(url.searchParams.get("page") ?? 1);

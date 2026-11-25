@@ -5,12 +5,14 @@ import type { EmailTab } from "../../api/emails";
 import logoUrl from "../../assets/onb-logo.png";
 import { buttonClasses } from "../../components/ui/buttonStyles";
 import { emailKeys, useEmailCount } from "../../emails/queries";
+import { useSlackOutcome } from "../../slack/useSlackOutcome";
 import { SearchBox } from "./SearchBox";
 import { SearchResults } from "./SearchResults";
 import { UserMenu } from "./UserMenu";
 
 /** Figma dashboard: left sidebar (logo, user card, Compose, nav) + main area. */
 export function DashboardLayout() {
+  useSlackOutcome();
   const [params] = useSearchParams();
   const q = params.get("q")?.trim() ?? "";
   return (

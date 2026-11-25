@@ -1,12 +1,15 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, LogOut, MessageSquare } from "lucide-react";
+import { ChevronDown, LogOut, Unplug } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { logout } from "../../api/auth";
+import { disconnectSlack, SLACK_CONNECT_PATH } from "../../api/slack";
 import { useMe } from "../../auth/useMe";
+import { SlackIcon } from "../../components/SlackIcon";
 import { Avatar } from "../../components/ui/Avatar";
 import { Spinner } from "../../components/ui/Spinner";
 import { useToast } from "../../components/ui/toastContext";
+import { slackStatusKey, useSlackStatus } from "../../slack/slack";
 
 const itemClasses =
   "flex w-full items-center gap-2 rounded-control px-3 py-2 text-left text-sm " +
@@ -75,14 +78,10 @@ export function UserMenu() {
           id={menuId}
           role="menu"
           aria-label="Account"
-          className="absolute inset-x-0 top-full z-10 mt-1 rounded-card border border-border bg-surface p-1 shadow-popover"
+          className="absolute top-full left-0 z-10 mt-1 w-72 rounded-card border border-border bg-surface p-1 shadow-popover"
         >
-          {/* Placeholder: the Connect Slack flow is wired up in M11. */}
-          <button type="button" role="menuitem" disabled className={itemClasses}>
-            <MessageSquare aria-hidden size={16} />
-            Connect Slack
-            <span className="ml-auto text-[11px]">Soon</span>
-          </button>
+          <SlackMenuItems />
+          <div role="separator" className="my-1 h-px bg-divider" />
           <button
             type="button"
             role="menuitem"
@@ -100,5 +99,94 @@ export function UserMenu() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Slack section of the account menu:
+ * - not configured on the server: disabled, with a hint
+ * - not connected: "Connect Slack" (full-page navigation to the OAuth start)
+ * - connected: "Slack connected ✓ (workspace)" and "Disconnect"
+ */
+function SlackMenuItems() {
+  const status = useSlackStatus();
+  const queryClient = useQueryClient();
+  const toast = useToast();
+
+  const disconnect = useMutation({
+    mutationFn: disconnectSlack,
+    onSuccess: () => {
+      toast.success("Slack disconnected. Rate-limit alerts are off.");
+      return queryClient.invalidateQueries({ queryKey: slackStatusKey });
+    },
+    onError: () => toast.error("Couldn't disconnect Slack. Please try again."),
+  });
+
+  if (status.isPending) {
+    return (
+      <div className={`${itemClasses} text-ink-muted`}>
+        <Spinner size={16} label="Checking Slack" />
+        Slack
+      </div>
+    );
+  }
+  if (status.isError) {
+    return (
+      <button
+        type="button"
+        role="menuitem"
+        className={itemClasses}
+        onClick={() => void status.refetch()}
+      >
+        <SlackIcon />
+        Slack status unavailable · Retry
+      </button>
+    );
+  }
+  if (!status.data.available) {
+    return (
+      <button
+        type="button"
+        role="menuitem"
+        disabled
+        className={itemClasses}
+        title="Set SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_REDIRECT_URL and ENCRYPTION_KEY on the server"
+      >
+        <SlackIcon />
+        Slack isn't set up on this server
+      </button>
+    );
+  }
+  if (!status.data.connected) {
+    return (
+      // A real navigation, not fetch: the API redirects to Slack's consent screen.
+      <a role="menuitem" href={SLACK_CONNECT_PATH} className={itemClasses}>
+        <SlackIcon />
+        Connect Slack
+      </a>
+    );
+  }
+  return (
+    <>
+      <div className={`${itemClasses} cursor-default`}>
+        <SlackIcon />
+        <span className="min-w-0 flex-1 break-words">
+          Slack connected <span className="text-primary">✓</span>
+          {status.data.teamName && (
+            <span className="whitespace-nowrap text-ink-muted"> ({status.data.teamName})</span>
+          )}
+        </span>
+      </div>
+      <button
+        type="button"
+        role="menuitem"
+        className={itemClasses}
+        disabled={disconnect.isPending}
+        onClick={() => disconnect.mutate()}
+      >
+        <Unplug aria-hidden size={16} />
+        Disconnect Slack
+      </button>
+    </>
   );
 }
