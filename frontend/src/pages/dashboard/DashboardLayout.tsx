@@ -1,17 +1,21 @@
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { Clock, RotateCw, Send, type LucideIcon } from "lucide-react";
-import { NavLink, Outlet, useMatch } from "react-router";
+import { NavLink, Outlet, useMatch, useSearchParams } from "react-router";
 import type { EmailTab } from "../../api/emails";
 import logoUrl from "../../assets/onb-logo.png";
 import { Button } from "../../components/ui/Button";
 import { emailKeys, useEmailCount } from "../../emails/queries";
+import { SearchBox } from "./SearchBox";
+import { SearchResults } from "./SearchResults";
 import { UserMenu } from "./UserMenu";
 
 /** Figma dashboard: left sidebar (logo, user card, Compose, nav) + main area. */
 export function DashboardLayout() {
+  const [params] = useSearchParams();
+  const q = params.get("q")?.trim() ?? "";
   return (
     <div className="flex h-full">
-      <aside className="flex w-[248px] shrink-0 flex-col gap-4 border-r border-border p-4">
+      <aside className="flex w-[248px] shrink-0 flex-col gap-4 p-4">
         <img src={logoUrl} alt="ONB" className="h-7 w-auto self-start" />
         <UserMenu />
         {/* Part D wires this to the compose page. */}
@@ -24,7 +28,8 @@ export function DashboardLayout() {
       <main className="flex min-w-0 flex-1 flex-col">
         <Toolbar />
         <div className="min-h-0 flex-1 overflow-auto px-4">
-          <Outlet />
+          {/* A search replaces the tab list; clearing it brings the list back. */}
+          {q ? <SearchResults key={q} q={q} /> : <Outlet />}
         </div>
       </main>
     </div>
@@ -83,6 +88,7 @@ function Toolbar() {
   const fetching = useIsFetching({ queryKey: emailKeys.all }) > 0;
   return (
     <div className="flex h-16 shrink-0 items-center gap-3 px-4">
+      <SearchBox />
       <div className="flex-1" />
       <button
         type="button"

@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { listEmails, type EmailTab } from "../api/emails";
+import { searchEmails } from "../api/search";
 
 /** Every email-related query lives under ["emails"], so one invalidate refreshes them all. */
 export const emailKeys = {
@@ -34,5 +35,14 @@ export function useEmailCount(tab: EmailTab, live = false) {
     queryFn: () => listEmails({ status: tab, page: 1, pageSize: 1 }),
     select: (res) => res.total,
     refetchInterval: live ? LIVE_REFRESH_MS : false,
+  });
+}
+
+/** Full-text search over the signed-in user's emails (all statuses). */
+export function useEmailSearch(q: string, page: number, pageSize: number) {
+  return useQuery({
+    queryKey: emailKeys.search(q, page, pageSize),
+    queryFn: () => searchEmails(q, page, pageSize),
+    enabled: q.length > 0,
   });
 }
