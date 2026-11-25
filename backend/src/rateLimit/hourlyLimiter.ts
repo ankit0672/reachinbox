@@ -28,6 +28,19 @@ for _, key in ipairs(KEYS) do
 end
 return 0`;
 
+// Raises each counter to its target if it is below it; never lowers one.
+// KEYS = counters; ARGV[1] = TTL seconds; ARGV[i+1] = target for KEYS[i].
+const RAISE_LUA = `
+local raised = 0
+for i, key in ipairs(KEYS) do
+  local target = tonumber(ARGV[i + 1])
+  if tonumber(redis.call('GET', key) or '0') < target then
+    redis.call('SET', key, target, 'EX', ARGV[1])
+    raised = raised + 1
+  end
+end
+return raised`;
+
 const CAPS = ["campaign", "sender", "global"] as const;
 export type CapName = (typeof CAPS)[number];
 
@@ -70,12 +83,7 @@ export class HourlyLimiter {
     campaignLimit: number;
   }): Promise<AcquireResult> {
     const window = windowOf(this.now(), this.config.windowMs);
-    const p = this.config.prefix;
-    const keys = [
-      `${p}:rl:cs:${job.campaignId}:${job.senderId}:${window}`,
-      `${p}:rl:s:${job.senderId}:${window}`,
-      `${p}:rl:g:${window}`,
-    ];
+    const keys = this.keysFor(job.campaignId, job.senderId, window);
     const limits = [job.campaignLimit, this.config.perSenderCap, this.config.globalCap];
 
     const blocked = Number(
@@ -88,6 +96,25 @@ export class HourlyLimiter {
       blockedBy: CAPS[blocked - 1]!,
       limit: limits[blocked - 1]!,
     };
+  }
+
+  /** Counter keys for one send, in cap order: [campaign-per-sender, sender, global]. */
+  keysFor(campaignId: string, senderId: string, window: number): [string, string, string] {
+    const p = this.config.prefix;
+    return [
+      `${p}:rl:cs:${campaignId}:${senderId}:${window}`,
+      `${p}:rl:s:${senderId}:${window}`,
+      `${p}:rl:g:${window}`,
+    ];
+  }
+
+  /** Raises counters to at least the given values (never lowers). Returns how many were raised. */
+  async raiseCounters(targets: Map<string, number>): Promise<number> {
+    if (targets.size === 0) return 0;
+    const keys = [...targets.keys()];
+    return Number(
+      await this.redis.eval(RAISE_LUA, keys.length, ...keys, this.ttlSeconds, ...targets.values()),
+    );
   }
 
   /** Refunds exactly the keys a previous acquire() incremented. */

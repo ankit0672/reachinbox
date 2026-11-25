@@ -2,7 +2,9 @@
 // killed and restarted independently.
 import { env } from "./config/env.js";
 import { prisma } from "./db/prisma.js";
+import { createEmailQueue } from "./queue/emailQueue.js";
 import { createEmailWorker } from "./queue/emailWorker.js";
+import { reconcile } from "./queue/reconcile.js";
 import { HourlyLimiter } from "./rateLimit/hourlyLimiter.js";
 import { redis } from "./redis/connection.js";
 import { closeTransports } from "./services/mailer.js";
@@ -17,6 +19,37 @@ const limiter = new HourlyLimiter(redis, {
   globalCap: env.MAX_EMAILS_PER_HOUR,
   rescheduleSpacingMs: env.RESCHEDULE_SPACING_MS,
 });
+
+// Runs once at boot, before this worker takes jobs: rebuild Redis from the DB
+// (missing jobs, stale claims, this window's counters). Best effort: a failure
+// is logged and the worker still starts, serving whatever jobs exist.
+const queue = createEmailQueue({
+  connection: redis,
+  prefix: env.BULLMQ_PREFIX,
+  attempts: env.EMAIL_JOB_ATTEMPTS,
+  backoffMs: env.EMAIL_JOB_BACKOFF_MS,
+});
+try {
+  const report = await reconcile({
+    queue,
+    redis,
+    prefix: env.BULLMQ_PREFIX,
+    limiter,
+    windowMs: env.RATE_LIMIT_WINDOW_MS,
+    staleProcessingMs: env.STALE_PROCESSING_MS,
+    chunkSize: env.RECONCILE_CHUNK_SIZE,
+    lockTtlMs: env.RECONCILE_LOCK_MS,
+  });
+  console.log(
+    report.skipped
+      ? "[worker] reconcile skipped: another worker holds the lock"
+      : `[worker] reconcile: scanned=${report.scanned} alreadyQueued=${report.alreadyQueued} ` +
+          `added=${report.added} replaced=${report.replaced} staleReset=${report.staleReset} ` +
+          `countersRaised=${report.countersRaised}`,
+  );
+} catch (err) {
+  console.error("[worker] reconcile FAILED (continuing):", err);
+}
 
 const worker = createEmailWorker({
   connection: redis,
@@ -48,6 +81,7 @@ async function shutdown(signal: string) {
   console.log(`[worker] ${signal} received: finishing active jobs, taking no new ones`);
   // close() waits for in-flight jobs, so a send is never cut off between SMTP and the DB update.
   await worker.close();
+  await queue.close();
   closeTransports();
   await Promise.allSettled([prisma.$disconnect(), redis.quit()]);
   console.log("[worker] shut down cleanly");

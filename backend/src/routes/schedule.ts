@@ -110,7 +110,7 @@ export function createScheduleRouter(deps: ScheduleDeps): Router {
       console.error(`[schedule] campaign ${campaignId}: ${err.message}:`, err.cause);
       res.status(503).json({
         error:
-          "Campaign saved, but not every email could be queued. All emails remain SCHEDULED in the database and the missing jobs will be re-queued by reconciliation.",
+          "Campaign saved, but not every email could be queued right now. All emails are stored as SCHEDULED; the missing jobs are re-queued automatically the next time a worker starts (startup reconcile).",
         campaignId,
         queued: err.queued,
         total: err.total,

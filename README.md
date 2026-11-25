@@ -48,7 +48,7 @@ curl -X POST localhost:3001/api/schedule \
 - `startTime` must include a timezone. A past `startTime` is sent as soon as possible.
 - `hourlyLimit` is **per sender**: each sender sends at most this many of the campaign's emails per window (so with 3 senders and `hourlyLimit: 50`, the campaign can send up to 150 per hour).
 - Leads are pre-packed into hourly windows at schedule time (see *Rate limiting* below); each email stores its lead position as `seq`.
-- The campaign and all its email rows are written in one transaction; jobs are enqueued only after it commits, in `ENQUEUE_CHUNK_SIZE` batches. If Redis fails part-way, the API answers `503` with how many were queued, and the rows stay `SCHEDULED` for reconciliation to re-queue.
+- The campaign and all its email rows are written in one transaction; jobs are enqueued only after it commits, in `ENQUEUE_CHUNK_SIZE` batches. If Redis fails part-way, the API answers `503` with how many were queued; all rows stay `SCHEDULED` and the missing jobs are re-queued the next time a worker starts (see *Persistence and crash recovery*).
 - Limits from `.env`: `MAX_LEADS_PER_CAMPAIGN`, `MAX_EMAIL_BODY_CHARS`, `ENQUEUE_CHUNK_SIZE`, `PLANNING_HORIZON_DAYS` (a plan that would end later is rejected with `400`).
 
 ## Rate limiting (M5)
@@ -89,3 +89,23 @@ Tests run against a separate `<POSTGRES_DB>_test` database on the same Postgres 
 ## Ethereal senders (so far)
 
 On first boot the backend creates `SENDER_POOL_SIZE` (default 3) Ethereal accounts and stores them in the `Sender` table. Later boots reuse them. A Postgres advisory lock stops the API and worker from both creating a pool when they start together. Ethereal passwords are stored in plaintext: they are throwaway fake-inbox accounts. Log in at https://ethereal.email with a sender's `email`/`smtpPass` to see everything it sent, or open the preview URL printed per message.
+
+## Persistence and crash recovery (M6)
+
+Postgres is the source of truth; Redis only holds execution state and can be rebuilt from it.
+
+- **Redis restarts:** Redis runs with AOF (`appendonly yes`) on a volume, so delayed jobs and limiter counters survive a Redis restart by themselves.
+- **API / worker restarts:** jobs live in Redis, not in the processes, so killing either (even `kill -9`) loses nothing; a restarted worker picks the delayed jobs up on time.
+- **Startup reconcile** (`src/queue/reconcile.ts`): runs **once** when a worker process boots, before it takes jobs. Never in the API, no timers or intervals. Several workers booting together are guarded by a Redis `SET NX PX` lock (`RECONCILE_LOCK_MS`), and every step is idempotent, so running it twice is harmless. It:
+  1. resets **stale** `PROCESSING` rows (claimed longer ago than `STALE_PROCESSING_MS`, default 10 min) back to `SCHEDULED`. Fresh `PROCESSING` rows are never touched;
+  2. **reseeds this window's rate-limit counters** from the `SENT` rows in the DB, with a Lua script that only *raises* a counter, never lowers it (same epoch window math as the limiter);
+  3. walks every `SCHEDULED` row in chunks (`RECONCILE_CHUNK_SIZE`): a job in `delayed` / `waiting` / `active` is left alone; a missing job is re-added with the remaining delay (0 if past due); a `completed` or `failed` job whose row is still `SCHEDULED` is removed and re-added (otherwise its id would block the new job). `SENT` and `FAILED` rows are never re-queued.
+
+  This covers a wiped Redis (e.g. deleting every key under the queue prefix): the worker's next boot restores every pending job from Postgres.
+
+**The at-least-once window, honestly.** Delivery is *at-least-once with an idempotency guard*, not exactly-once:
+
+- The atomic claim (`SCHEDULED -> PROCESSING`) means duplicate jobs, racing workers and BullMQ's stalled-job re-runs can never send a row twice while its claim is live.
+- If a worker dies **after the SMTP server accepted the mail but before the row was marked `SENT`**, the row stays `PROCESSING`. Nothing re-sends it until a worker boots after `STALE_PROCESSING_MS` and resets it, and that reset **will send it again**. The duplicate carries the same deterministic `Message-ID` (`<email.id@sender-domain>`), so receivers and logs can detect it.
+- If the worker dies **before** sending, the same path delivers the first and only copy, late by up to `STALE_PROCESSING_MS` (plus however long until the next worker boot).
+- SMTP phases are bounded by `SMTP_TIMEOUT_MS` (default 30 s; nodemailer's own socket default is 10 min), and the env loader refuses a `STALE_PROCESSING_MS` below `3 x SMTP_TIMEOUT_MS + 30 s` (BullMQ's lock), so a slow but live send is never mistaken for a crashed one.
