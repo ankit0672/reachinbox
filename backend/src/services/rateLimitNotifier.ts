@@ -14,8 +14,6 @@ export interface RateLimitEvent {
 
 export type RateLimitHook = (event: RateLimitEvent) => void | Promise<void>;
 
-// TODO(M9): post a Slack message to the user's connected workspace. Look the
-// connection up at call time (none -> return silently) and dedupe with
-// SET {prefix}:slack:{userId}:{senderId}:{window} NX EX <2 windows>, so each
-// user hears once per sender per window, not once per rescheduled email.
+// Default hook: does nothing. The worker uses createSlackNotifier
+// (services/slackNotifier.ts) when ENCRYPTION_KEY is configured.
 export const notifyRateLimit: RateLimitHook = () => {};

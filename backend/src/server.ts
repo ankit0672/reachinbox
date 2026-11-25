@@ -7,6 +7,7 @@ import { redis } from "./redis/connection.js";
 import { bestEffort } from "./search/emailIndex.js";
 import { emailIndex } from "./search/client.js";
 import { ensureSenderPool } from "./services/senderService.js";
+import { SlackApi } from "./slack/slackApi.js";
 
 // First boot creates the Ethereal sender pool; later boots find it in the DB.
 const senders = await ensureSenderPool(env.SENDER_POOL_SIZE);
@@ -27,8 +28,29 @@ if (!auth.google) {
   console.warn("[auth] GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set: Google login is disabled");
 }
 
+const slackConfig =
+  env.SLACK_CLIENT_ID && env.SLACK_CLIENT_SECRET && env.SLACK_REDIRECT_URL
+    ? {
+        clientId: env.SLACK_CLIENT_ID,
+        clientSecret: env.SLACK_CLIENT_SECRET,
+        redirectUrl: env.SLACK_REDIRECT_URL,
+      }
+    : undefined;
+console.log(
+  slackConfig
+    ? `[slack] OAuth callback expected at ${slackConfig.redirectUrl} (must match the Slack app's Redirect URL)`
+    : "[slack] SLACK_CLIENT_ID / SLACK_CLIENT_SECRET / SLACK_REDIRECT_URL not set: Connect Slack is disabled",
+);
+
 const app = createApp(realHealthChecks, {
   auth,
+  slack: {
+    config: slackConfig,
+    api: new SlackApi(),
+    redis,
+    prefix: env.BULLMQ_PREFIX,
+    encryptionKey: env.ENCRYPTION_KEY,
+  },
   emails: { maxPageSize: env.LIST_MAX_PAGE_SIZE },
   schedule: { emailQueue, enqueueChunkSize: env.ENQUEUE_CHUNK_SIZE, search: emailIndex },
   search: { index: emailIndex, maxPageSize: env.SEARCH_MAX_PAGE_SIZE },

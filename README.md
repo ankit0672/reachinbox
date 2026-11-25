@@ -28,7 +28,8 @@ curl localhost:3001/health    # 200 when DB, Redis and ES are all reachable
 npm run send:test-email       # sends one mail via sender 1 and prints the Ethereal preview URL
 npm run dev:worker            # separate worker process: consumes the BullMQ email queue
 npm run reindex               # rebuild the Elasticsearch index from Postgres (idempotent)
-npm run seed:emails -- 3 5000 # dev-only: insert 3 email rows due in 5s directly (bypasses the API's pre-packing)
+npm run seed:emails -- --count 3 --delay 5000   # dev-only: insert rows directly, bypassing pre-packing
+                              # (flags: --user <email> --hourly-limit <n> --senders <n>)
 npm test                      # vitest; needs compose up
 ```
 
@@ -162,3 +163,21 @@ cd backend && npm run tunnel     # = ngrok http --url=$NGROK_DOMAIN $API_PORT
 - It only needs to be running **during the "Connect Slack" flow**, when Slack redirects the browser back to the callback. The worker's Slack messages are *outbound* calls to Slack's API and don't use the tunnel.
 - On the free plan, the first visit to the ngrok URL in a browser shows an ngrok **"You are about to visit..." warning page**; click *Visit Site* to continue to the callback. This is ngrok's interstitial, not an error.
 - `npm run tunnel` exits with a clear message if `NGROK_DOMAIN` is empty or the ngrok CLI is not installed.
+
+## Slack alerts (M9)
+
+When one of your senders hits a rate limit, you get **one Slack DM per sender per hour window** saying which limit was hit and when sending resumes (e.g. *"Hourly limit reached for sender x@ethereal.email: this campaign's limit of 3 emails per sender per hour. The remaining emails were not dropped. They were rescheduled, and sending resumes at 2026-11-25 13:00 UTC."*).
+
+**Set up (once):**
+1. Use a **separate Slack workspace** for development (https://slack.com/get-started#/createnew), not a company one.
+2. Start the tunnel (see *Slack tunnel*) and create the app at https://api.slack.com/apps -> *Create New App* -> *From a manifest*, choosing that workspace, with [`backend/slack/manifest.yml`](backend/slack/manifest.yml) (replace `YOUR-NGROK-DOMAIN`). Scopes: `chat:write` (post) and `im:write` (open a DM with the user who connected).
+3. From the app's *Basic Information*, put `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` in `.env`, plus `SLACK_REDIRECT_URL=https://<NGROK_DOMAIN>/api/slack/callback`. All three or none. `ENCRYPTION_KEY` must be set too. The API logs which callback URL it expects at startup.
+
+**Endpoints**
+- `GET /api/slack/connect` (logged in): redirects to Slack's consent page. The OAuth `state` is a signed, purpose-tagged, 10-minute, **single-use** token carrying the user id, because Slack redirects to the tunnel/production host where the login cookie may not exist.
+- `GET /api/slack/callback` (public, verified by `state`): exchanges the code (`oauth.v2.access`), opens a DM with the connecting user (`conversations.open`), stores the bot token **encrypted with AES-256-GCM** (`ENCRYPTION_KEY`) in `SlackConnection`, and redirects to `FRONTEND_URL/dashboard?slack=connected` (or `denied`, `invalid_state`, `error`, `not_configured`).
+- `GET /api/slack/status` -> `{ available, connected, teamName?, connectedAt? }`, never the token. `DELETE /api/slack/disconnect` revokes the token at Slack (best effort) and deletes the connection.
+
+**Behaviour**
+- The worker calls the notifier on every rate-limit reschedule (fire-and-forget). It looks the connection up **at that moment**, so connecting Slack later works without a restart; with no connection it logs once per sender per window and carries on.
+- Dedupe: `SET {prefix}:slack:sent:{user}:{sender}:{window} NX EX <2 windows>`, so 1,000 rescheduled emails still produce one message per sender per window. If Slack returns an error the message is logged, nothing is thrown, and the dedupe slot is released so the next limit hit retries.

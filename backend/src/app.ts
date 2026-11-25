@@ -14,6 +14,7 @@ import { createEmailsRouter, type EmailsDeps } from "./routes/emails.js";
 import { createHealthRouter, type HealthChecks } from "./routes/health.js";
 import { createScheduleRouter, type ScheduleDeps } from "./routes/schedule.js";
 import { createSearchRouter, type SearchDeps } from "./routes/search.js";
+import { createSlackRouters, type SlackDeps } from "./routes/slack.js";
 
 export interface AppOptions {
   timeoutMs?: number;
@@ -22,6 +23,7 @@ export interface AppOptions {
   schedule?: ScheduleDeps;
   search?: SearchDeps;
   emails?: EmailsDeps;
+  slack?: SlackDeps;
   bullBoard?: BullBoardOptions;
 }
 
@@ -47,16 +49,19 @@ export function createApp(healthChecks: HealthChecks, opts: AppOptions = {}) {
     if (board) app.use(BULL_BOARD_PATH, board);
   }
 
-  if (opts.schedule || opts.search || opts.emails) {
+  if (opts.schedule || opts.search || opts.emails || opts.slack) {
     if (!auth) throw new Error("createApp: /api routes need an auth config");
   }
   if (auth) {
     app.use("/api/auth", createAuthRouter(auth)); // public (login, logout; /me checks itself)
+    const slack = opts.slack ? createSlackRouters(opts.slack, auth) : undefined;
+    if (slack) app.use("/api/slack", slack.callback); // public: identified by its signed state
     const api = express.Router();
     api.use(requireAuth(auth)); // everything else under /api needs a session
     if (opts.schedule) api.use("/schedule", createScheduleRouter(opts.schedule));
     if (opts.search) api.use("/search", createSearchRouter(opts.search));
     if (opts.emails) api.use("/emails", createEmailsRouter(opts.emails));
+    if (slack) api.use("/slack", slack.authed);
     app.use("/api", api);
   }
 

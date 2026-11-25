@@ -103,6 +103,7 @@ describe("parseEnv", () => {
       NODE_ENV: "production",
       GOOGLE_CLIENT_ID: "id",
       GOOGLE_CLIENT_SECRET: "secret",
+      ENCRYPTION_KEY: "ab".repeat(32), // required in production since M9
     };
     expect(() => parseEnv(prod)).not.toThrow();
     expect(() =>
@@ -111,6 +112,33 @@ describe("parseEnv", () => {
     expect(() => parseEnv({ ...prod, GOOGLE_CLIENT_SECRET: "" })).toThrowError(
       /GOOGLE_CLIENT_SECRET/,
     );
+  });
+
+  it("Slack is optional, but all-or-nothing, https-only, and needs an ENCRYPTION_KEY", () => {
+    const slack = {
+      SLACK_CLIENT_ID: "id",
+      SLACK_CLIENT_SECRET: "secret",
+      SLACK_REDIRECT_URL: "https://x.ngrok-free.dev/api/slack/callback",
+      ENCRYPTION_KEY: "ab".repeat(32),
+    };
+    expect(parseEnv(valid).SLACK_CLIENT_ID).toBeUndefined();
+    expect(() => parseEnv({ ...valid, ...slack })).not.toThrow();
+    expect(() => parseEnv({ ...valid, ...slack, SLACK_CLIENT_SECRET: "" })).toThrowError(
+      /SLACK_CLIENT_SECRET/,
+    );
+    expect(() => parseEnv({ ...valid, ...slack, ENCRYPTION_KEY: "" })).toThrowError(
+      /ENCRYPTION_KEY/,
+    );
+    expect(() => parseEnv({ ...valid, ...slack, ENCRYPTION_KEY: "not-hex" })).toThrowError(
+      /ENCRYPTION_KEY/,
+    );
+    expect(() =>
+      parseEnv({
+        ...valid,
+        ...slack,
+        SLACK_REDIRECT_URL: "http://localhost:3001/api/slack/callback",
+      }),
+    ).toThrowError(/SLACK_REDIRECT_URL/);
   });
 
   it("rejects malformed URLs", () => {

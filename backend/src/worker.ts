@@ -10,6 +10,8 @@ import { redis } from "./redis/connection.js";
 import { emailIndex, esClient } from "./search/client.js";
 import { bestEffort } from "./search/emailIndex.js";
 import { closeTransports } from "./services/mailer.js";
+import { createSlackNotifier } from "./services/slackNotifier.js";
+import { SlackApi } from "./slack/slackApi.js";
 import { ensureSenderPool } from "./services/senderService.js";
 
 const senders = await ensureSenderPool(env.SENDER_POOL_SIZE);
@@ -54,6 +56,20 @@ try {
   console.error("[worker] reconcile FAILED (continuing):", err);
 }
 
+// Slack alerts need ENCRYPTION_KEY to read stored tokens; without it the hook is a no-op.
+const onRateLimited = env.ENCRYPTION_KEY
+  ? createSlackNotifier({
+      redis,
+      prefix: env.BULLMQ_PREFIX,
+      api: new SlackApi(),
+      encryptionKey: env.ENCRYPTION_KEY,
+      windowMs: env.RATE_LIMIT_WINDOW_MS,
+    })
+  : undefined;
+console.log(
+  `[worker] Slack rate-limit alerts ${onRateLimited ? "enabled" : "disabled (no ENCRYPTION_KEY)"}`,
+);
+
 const worker = createEmailWorker({
   connection: redis,
   prefix: env.BULLMQ_PREFIX,
@@ -61,6 +77,7 @@ const worker = createEmailWorker({
   limiter,
   minDelayMs: env.MIN_DELAY_BETWEEN_SENDS_MS,
   search: emailIndex,
+  onRateLimited,
 });
 
 worker.on("ready", () =>

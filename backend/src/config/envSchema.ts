@@ -63,6 +63,26 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32, "must be at least 32 characters"),
   JWT_EXPIRES_IN: duration.prefault("7d"), // prefault: the default goes through the transform
   LIST_MAX_PAGE_SIZE: z.coerce.number().int().positive().max(1000).default(100),
+  // Slack (all three or none) and the key that encrypts Slack tokens at rest
+  SLACK_CLIENT_ID: optionalString,
+  SLACK_CLIENT_SECRET: optionalString,
+  SLACK_REDIRECT_URL: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z
+      .url()
+      .refine(
+        (u) => u.startsWith("https://"),
+        "must be an https:// URL (Slack rejects http redirects)",
+      )
+      .optional(),
+  ),
+  ENCRYPTION_KEY: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z
+      .string()
+      .regex(/^[0-9a-fA-F]{64}$/, "must be 64 hex chars (openssl rand -hex 32)")
+      .optional(),
+  ),
   // Bull Board basic auth; empty = not configured
   BULL_BOARD_USER: z.string().optional(),
   BULL_BOARD_PASS: z.string().optional(),
@@ -72,6 +92,24 @@ const schema = z.object({
 // socket timeouts. A PROCESSING row younger than that may still be mid-send.
 const BULLMQ_LOCK_MS = 30_000;
 const checked = schema.superRefine((env, ctx) => {
+  const slackKeys = ["SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "SLACK_REDIRECT_URL"] as const;
+  if (slackKeys.some((k) => env[k])) {
+    for (const k of [...slackKeys, "ENCRYPTION_KEY"] as const) {
+      if (!env[k])
+        ctx.addIssue({
+          code: "custom",
+          path: [k],
+          message: "is required when Slack is configured",
+        });
+    }
+  }
+  if (env.NODE_ENV === "production" && !env.ENCRYPTION_KEY) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["ENCRYPTION_KEY"],
+      message: "is required in production",
+    });
+  }
   if (env.NODE_ENV === "production") {
     if (env.JWT_SECRET === PLACEHOLDER_JWT_SECRET) {
       ctx.addIssue({
