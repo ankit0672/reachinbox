@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db/prisma.js";
 import type { Sender } from "../generated/prisma/client.js";
 import { windowOf, windowStart } from "../rateLimit/window.js";
+import type { EmailDoc, EmailIndex } from "../search/emailIndex.js";
 
 const emailSchema = z.email();
 
@@ -174,7 +175,7 @@ export async function scheduleCampaign(
   input: CampaignInput,
   leads: string[],
   settings: PlanningSettings,
-): Promise<{ campaignId: string; planned: PlannedEmail[] }> {
+): Promise<{ campaignId: string; planned: PlannedEmail[]; senders: Sender[] }> {
   return prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SCHEDULE_LOCK_ID})`;
@@ -224,8 +225,39 @@ export async function scheduleCampaign(
           })),
         });
       }
-      return { campaignId, planned };
+      return { campaignId, planned, senders };
     },
     { timeout: settings.txTimeoutMs, maxWait: settings.txTimeoutMs },
   );
+}
+
+/**
+ * Indexes a just-committed campaign's emails in Elasticsearch. Called after
+ * the DB commit and BEFORE the jobs are enqueued, so a worker's status update
+ * can never reach ES ahead of the document it updates.
+ */
+export async function indexNewEmails(
+  index: EmailIndex,
+  c: {
+    userId: string;
+    campaignId: string;
+    input: CampaignInput;
+    planned: PlannedEmail[];
+    senders: Sender[];
+  },
+): Promise<void> {
+  const senderEmail = new Map(c.senders.map((s) => [s.id, s.email]));
+  const docs: EmailDoc[] = c.planned.map((p) => ({
+    id: p.id,
+    userId: c.userId,
+    campaignId: c.campaignId,
+    toEmail: p.toEmail,
+    senderEmail: senderEmail.get(p.senderId)!,
+    subject: c.input.subject,
+    body: c.input.body,
+    status: "scheduled",
+    scheduledAt: p.scheduledAt.toISOString(),
+    sentAt: null,
+  }));
+  await index.indexMany(docs);
 }

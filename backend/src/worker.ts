@@ -7,10 +7,13 @@ import { createEmailWorker } from "./queue/emailWorker.js";
 import { reconcile } from "./queue/reconcile.js";
 import { HourlyLimiter } from "./rateLimit/hourlyLimiter.js";
 import { redis } from "./redis/connection.js";
+import { emailIndex, esClient } from "./search/client.js";
+import { bestEffort } from "./search/emailIndex.js";
 import { closeTransports } from "./services/mailer.js";
 import { ensureSenderPool } from "./services/senderService.js";
 
 const senders = await ensureSenderPool(env.SENDER_POOL_SIZE);
+await bestEffort(`ensure index ${emailIndex.name}`, () => emailIndex.ensureIndex());
 
 const limiter = new HourlyLimiter(redis, {
   prefix: env.BULLMQ_PREFIX,
@@ -57,6 +60,7 @@ const worker = createEmailWorker({
   concurrency: env.WORKER_CONCURRENCY,
   limiter,
   minDelayMs: env.MIN_DELAY_BETWEEN_SENDS_MS,
+  search: emailIndex,
 });
 
 worker.on("ready", () =>
@@ -83,7 +87,7 @@ async function shutdown(signal: string) {
   await worker.close();
   await queue.close();
   closeTransports();
-  await Promise.allSettled([prisma.$disconnect(), redis.quit()]);
+  await Promise.allSettled([prisma.$disconnect(), redis.quit(), esClient.close()]);
   console.log("[worker] shut down cleanly");
   process.exit(0);
 }

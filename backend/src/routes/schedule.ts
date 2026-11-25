@@ -2,9 +2,11 @@ import { Router } from "express";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { EnqueueError, enqueueEmails, type EmailQueue } from "../queue/emailQueue.js";
+import { bestEffort, type EmailIndex } from "../search/emailIndex.js";
 import {
   NoSendersError,
   PlanningHorizonError,
+  indexNewEmails,
   normalizeLeads,
   scheduleCampaign,
   type PlanningSettings,
@@ -17,6 +19,8 @@ export interface ScheduleDeps {
   enqueueChunkSize: number;
   /** Overrides for tests; defaults come from .env. */
   planning?: Partial<PlanningSettings>;
+  /** Elasticsearch index; omit to skip search indexing. */
+  search?: EmailIndex;
 }
 
 const planningFromEnv = (): PlanningSettings => ({
@@ -82,8 +86,9 @@ export function createScheduleRouter(deps: ScheduleDeps): Router {
 
     let campaignId: string;
     let planned: Awaited<ReturnType<typeof scheduleCampaign>>["planned"];
+    let senders: Awaited<ReturnType<typeof scheduleCampaign>>["senders"];
     try {
-      ({ campaignId, planned } = await scheduleCampaign(
+      ({ campaignId, planned, senders } = await scheduleCampaign(
         req.user!.id,
         input,
         report.accepted,
@@ -99,6 +104,15 @@ export function createScheduleRouter(deps: ScheduleDeps): Router {
         return;
       }
       throw err;
+    }
+
+    // Committed. Index for search before enqueueing (see indexNewEmails); an
+    // Elasticsearch failure is logged and never blocks the campaign.
+    const index = deps.search;
+    if (index) {
+      await bestEffort(`index new emails for campaign ${campaignId}`, () =>
+        indexNewEmails(index, { userId: req.user!.id, campaignId, input, planned, senders }),
+      );
     }
 
     // Enqueue only after the commit. If Redis fails part-way, the rows stay

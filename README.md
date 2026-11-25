@@ -27,6 +27,7 @@ npm run dev:api               # API on http://localhost:3001 (creates the Ethere
 curl localhost:3001/health    # 200 when DB, Redis and ES are all reachable
 npm run send:test-email       # sends one mail via sender 1 and prints the Ethereal preview URL
 npm run dev:worker            # separate worker process: consumes the BullMQ email queue
+npm run reindex               # rebuild the Elasticsearch index from Postgres (idempotent)
 npm run seed:emails -- 3 5000 # dev-only: insert 3 email rows due in 5s and enqueue them (until the M4 API exists)
 npm test                      # vitest; needs compose up
 ```
@@ -109,3 +110,17 @@ Postgres is the source of truth; Redis only holds execution state and can be reb
 - If a worker dies **after the SMTP server accepted the mail but before the row was marked `SENT`**, the row stays `PROCESSING`. Nothing re-sends it until a worker boots after `STALE_PROCESSING_MS` and resets it, and that reset **will send it again**. The duplicate carries the same deterministic `Message-ID` (`<email.id@sender-domain>`), so receivers and logs can detect it.
 - If the worker dies **before** sending, the same path delivers the first and only copy, late by up to `STALE_PROCESSING_MS` (plus however long until the next worker boot).
 - SMTP phases are bounded by `SMTP_TIMEOUT_MS` (default 30 s; nodemailer's own socket default is 10 min), and the env loader refuses a `STALE_PROCESSING_MS` below `3 x SMTP_TIMEOUT_MS + 30 s` (BullMQ's lock), so a slow but live send is never mistaken for a crashed one.
+
+## Bull Board (M7)
+
+Live BullMQ dashboard for the real `email-send` queue at **http://localhost:3001/admin/queues**, mounted in the API process behind HTTP basic auth (`BULL_BOARD_USER` / `BULL_BOARD_PASS`, compared in constant time). If either is empty the dashboard is not mounted. The `.env.example` placeholder password (`change-me`) is refused in production (not mounted) and only allowed in development with a warning in the log.
+
+## Search (M7)
+
+Every email is a document in the `<ES_INDEX_PREFIX>-emails` index (`_id` = email id) with an explicit, strict mapping: `id`, `userId`, `campaignId`, `status`, `toEmail`, `senderEmail` as keyword (`toEmail` also has a `.text` sub-field so partial addresses match), `subject` and `body` as text, `scheduledAt` and `sentAt` as dates. API and worker both create it at startup if missing (idempotent).
+
+- **On create:** after the campaign transaction commits and *before* its jobs are enqueued, the new emails are bulk-indexed (`ES_BULK_CHUNK_SIZE` per request). Indexing first means a worker's status update can never reach Elasticsearch ahead of the document it updates.
+- **On every status change** (`sent`, `failed`, and back to `scheduled` with the new `scheduledAt` after a rate-limit reschedule; retries stay `scheduled`) the worker upserts the full document with `doc_as_upsert`, so a document whose create was lost is recreated whole. These writes are fire-and-forget and never delay a send.
+- **`GET /api/search?q=&status=&page=&pageSize=`** searches `subject`, `body` and `toEmail`; `status` (`scheduled` / `sent` / `failed`) is an exact filter. Results are **always filtered to the signed-in user**. `pageSize` is capped by `SEARCH_MAX_PAGE_SIZE` and `page x pageSize` by 10,000. Response: `{ total, page, pageSize, results }`.
+- **Elasticsearch is secondary.** If it is down or slow (`ES_REQUEST_TIMEOUT_MS`), scheduling and sending carry on; each failed write logs `[search] ... failed (Postgres is unaffected; run "npm run reindex" to resync)`, and `/api/search` answers `503`. The index is eventually consistent with Postgres.
+- **`npm run reindex`** rebuilds the index from Postgres in chunks (overwriting by `_id`), then walks the index and deletes documents whose row no longer exists. It is idempotent and safe to run while the app is live.

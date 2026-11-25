@@ -2,9 +2,10 @@ import { DelayedError, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { prisma } from "../db/prisma.js";
 import type { HourlyLimiter } from "../rateLimit/hourlyLimiter.js";
+import { bestEffort, toEmailDoc, type EmailIndex } from "../search/emailIndex.js";
 import { sendMail, type OutgoingMail, type SentMail } from "../services/mailer.js";
 import { notifyRateLimit, type RateLimitHook } from "../services/rateLimitNotifier.js";
-import type { Sender } from "../generated/prisma/client.js";
+import type { Email, Sender } from "../generated/prisma/client.js";
 import { EMAIL_QUEUE, type EmailJobData } from "./emailQueue.js";
 
 export type SendFn = (sender: Sender, mail: OutgoingMail) => Promise<SentMail>;
@@ -26,6 +27,17 @@ export interface ProcessDeps {
   /** Omit to disable hourly limits (e.g. M3 tests). */
   limiter?: HourlyLimiter;
   onRateLimited?: RateLimitHook;
+  /** Elasticsearch index to keep in sync; omit to skip. */
+  search?: EmailIndex;
+}
+
+// Status changes go to Elasticsearch as a full-document upsert, fire-and-forget:
+// a slow or dead cluster must never delay or fail a send (the DB is authoritative).
+function syncSearch(index: EmailIndex | undefined, email: Email & { sender: { email: string } }) {
+  if (!index) return;
+  void bestEffort(`update email ${email.id} (${email.status})`, () =>
+    index.upsert(toEmailDoc(email)),
+  );
 }
 
 export async function processEmail(emailId: string, deps: ProcessDeps): Promise<ProcessResult> {
@@ -61,6 +73,7 @@ export async function processEmail(emailId: string, deps: ProcessDeps): Promise<
           where: { id: emailId, status: "PROCESSING" },
           data: { status: "SCHEDULED", scheduledAt: resumeAt },
         });
+        syncSearch(deps.search, { ...email, status: "SCHEDULED", scheduledAt: resumeAt });
         fireAndForget(deps.onRateLimited, {
           userId: email.userId,
           campaignId: email.campaignId,
@@ -99,19 +112,23 @@ export async function processEmail(emailId: string, deps: ProcessDeps): Promise<
         errorMessage: err instanceof Error ? err.message : String(err),
       },
     });
+    // A retry keeps the doc at "scheduled"; only the final failure changes it.
+    if (deps.isFinalAttempt) syncSearch(deps.search, { ...email, status: "FAILED" });
     throw err;
   }
 
+  const sentAt = new Date();
   await prisma.email.updateMany({
     where: { id: emailId, status: "PROCESSING" },
     data: {
       status: "SENT",
-      sentAt: new Date(),
+      sentAt,
       messageId: result.messageId,
       previewUrl: result.previewUrl,
       errorMessage: null,
     },
   });
+  syncSearch(deps.search, { ...email, status: "SENT", sentAt, messageId: result.messageId });
   return "sent";
 }
 
@@ -132,6 +149,7 @@ export interface EmailWorkerSettings {
   /** Global floor between any two job starts across all workers; 0 = off. */
   minDelayMs?: number;
   onRateLimited?: RateLimitHook;
+  search?: EmailIndex;
 }
 
 export function createEmailWorker(
@@ -141,6 +159,7 @@ export function createEmailWorker(
     send: settings.send ?? sendMail,
     limiter: settings.limiter,
     onRateLimited: settings.onRateLimited ?? notifyRateLimit,
+    search: settings.search,
   };
 
   const processor = async (job: Job<EmailJobData>, token?: string) => {

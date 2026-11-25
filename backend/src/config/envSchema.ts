@@ -33,6 +33,17 @@ const schema = z.object({
   STALE_PROCESSING_MS: z.coerce.number().int().positive().default(600_000),
   RECONCILE_CHUNK_SIZE: z.coerce.number().int().positive().default(500),
   RECONCILE_LOCK_MS: z.coerce.number().int().positive().default(60_000),
+  // Elasticsearch / search
+  ES_INDEX_PREFIX: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9_-]*$/, "lowercase letters, digits, - and _ only")
+    .default("reachinbox"),
+  ES_BULK_CHUNK_SIZE: z.coerce.number().int().positive().default(500),
+  ES_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  SEARCH_MAX_PAGE_SIZE: z.coerce.number().int().positive().max(1000).default(100),
+  // Bull Board basic auth; empty = not configured
+  BULL_BOARD_USER: z.string().optional(),
+  BULL_BOARD_PASS: z.string().optional(),
 });
 
 // BullMQ's default job lock is 30s; a send can take up to connect + greeting +

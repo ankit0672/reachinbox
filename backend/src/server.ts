@@ -3,6 +3,8 @@ import { env } from "./config/env.js";
 import { closeInfraClients, realHealthChecks } from "./health/realChecks.js";
 import { createEmailQueue } from "./queue/emailQueue.js";
 import { redis } from "./redis/connection.js";
+import { bestEffort } from "./search/emailIndex.js";
+import { emailIndex } from "./search/client.js";
 import { ensureSenderPool } from "./services/senderService.js";
 
 // First boot creates the Ethereal sender pool; later boots find it in the DB.
@@ -16,12 +18,23 @@ const emailQueue = createEmailQueue({
   backoffMs: env.EMAIL_JOB_BACKOFF_MS,
 });
 
+// Idempotent; if Elasticsearch is down the API still starts (search answers 503).
+await bestEffort(`ensure index ${emailIndex.name}`, () => emailIndex.ensureIndex());
+
 const app = createApp(realHealthChecks, {
-  schedule: { emailQueue, enqueueChunkSize: env.ENQUEUE_CHUNK_SIZE },
+  schedule: { emailQueue, enqueueChunkSize: env.ENQUEUE_CHUNK_SIZE, search: emailIndex },
+  search: { index: emailIndex, maxPageSize: env.SEARCH_MAX_PAGE_SIZE },
+  bullBoard: {
+    queue: emailQueue,
+    user: env.BULL_BOARD_USER,
+    pass: env.BULL_BOARD_PASS,
+    nodeEnv: env.NODE_ENV,
+  },
 });
 
 const server = app.listen(env.API_PORT, () => {
   console.log(`[api] listening on http://localhost:${env.API_PORT}`);
+  console.log(`[api] Bull Board: http://localhost:${env.API_PORT}/admin/queues`);
 });
 
 function shutdown(signal: string) {
