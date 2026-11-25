@@ -245,3 +245,49 @@ describe("GET /api/emails", () => {
     expect(JSON.stringify(res.body.details)).toMatch(field);
   });
 });
+
+describe("GET /api/emails/:id", () => {
+  const getOne = (cookie: string, id: string) =>
+    request(app()).get(`/api/emails/${id}`).set("Cookie", cookie);
+  const idOf = async (toEmail: string) =>
+    (await prisma.email.findFirstOrThrow({ where: { toEmail } })).id;
+
+  it("returns the full email for its owner", async () => {
+    const res = await getOne(alice.cookie, await idOf("a-sent-new@x.com"));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      id: expect.any(String),
+      toEmail: "a-sent-new@x.com",
+      subject: "Subject a-sent-new@x.com",
+      body: "B",
+      status: "sent",
+      scheduledAt: T(4).toISOString(),
+      sentAt: T(8).toISOString(),
+      failedAt: null,
+      previewUrl: "https://ethereal.email/message/new",
+      errorMessage: null,
+    });
+  });
+
+  it("includes the failure reason and time for FAILED rows", async () => {
+    const res = await getOne(alice.cookie, await idOf("a-failed@x.com"));
+    expect(res.body).toMatchObject({
+      status: "failed",
+      failedAt: T(5).toISOString(),
+      errorMessage: "SMTP 421 service not available",
+      previewUrl: null,
+    });
+  });
+
+  it("is 404 for someone else's email (no hint that it exists)", async () => {
+    const res = await getOne(alice.cookie, await idOf("b-sent@x.com"));
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "Email not found" });
+  });
+
+  it("is 404 for an unknown or malformed id, and 401 without a session", async () => {
+    expect((await getOne(alice.cookie, "00000000-0000-4000-8000-000000000000")).status).toBe(404);
+    expect((await getOne(alice.cookie, "not-a-uuid")).status).toBe(404);
+    expect((await request(app()).get("/api/emails/whatever")).status).toBe(401);
+  });
+});

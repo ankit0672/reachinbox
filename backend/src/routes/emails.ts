@@ -95,5 +95,29 @@ export function createEmailsRouter(deps: EmailsDeps): Router {
     res.json({ total, page, pageSize, results: rows.map(toResult) });
   });
 
+  // One email for the detail page. Scoped by userId in the query itself, so
+  // someone else's id is indistinguishable from a missing one (404 either way).
+  router.get("/:id", async (req, res) => {
+    const email = await prisma.email.findFirst({
+      where: { id: req.params.id, userId: req.user!.id },
+    });
+    if (!email) {
+      res.status(404).json({ error: "Email not found" });
+      return;
+    }
+    res.json({
+      id: email.id,
+      toEmail: email.toEmail,
+      subject: email.subject,
+      body: email.body,
+      status: email.status.toLowerCase(),
+      scheduledAt: email.scheduledAt,
+      sentAt: email.sentAt,
+      failedAt: email.failedAt,
+      previewUrl: email.status === "SENT" ? email.previewUrl : null,
+      errorMessage: email.status === "FAILED" ? email.errorMessage : null,
+    });
+  });
+
   return router;
 }

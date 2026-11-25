@@ -61,20 +61,19 @@ export function StatusChip({ status, scheduledAt, sentAt, errorMessage }: ChipPr
   }
 }
 
-/** Hover/focus tooltip; the text is also the trigger's accessible description. */
+/**
+ * Hover tooltip; the text is also the trigger's accessible description. Not
+ * focusable itself: rows are links, and the detail page shows the full error.
+ */
 function Tooltip({ text, children }: { text: string; children: ReactNode }) {
   const id = useId();
   return (
-    <span
-      tabIndex={0}
-      aria-describedby={id}
-      className="group relative inline-flex focus:outline-none"
-    >
+    <span aria-describedby={id} className="group relative inline-flex">
       {children}
       <span
         id={id}
         role="tooltip"
-        className="pointer-events-none invisible absolute top-full left-0 z-20 mt-1 w-max max-w-xs rounded-control bg-ink px-2 py-1 text-xs text-white opacity-0 shadow-popover transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100"
+        className="pointer-events-none invisible absolute top-full left-0 z-20 mt-1 w-max max-w-xs rounded-control bg-ink px-2 py-1 text-xs text-white opacity-0 shadow-popover transition-opacity group-hover:visible group-hover:opacity-100"
       >
         {text}
       </span>

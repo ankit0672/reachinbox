@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { listEmails, type EmailTab } from "../api/emails";
+import { getEmail, listEmails, type EmailTab } from "../api/emails";
 import { searchEmails } from "../api/search";
 
 /** Every email-related query lives under ["emails"], so one invalidate refreshes them all. */
@@ -44,5 +44,17 @@ export function useEmailSearch(q: string, page: number, pageSize: number) {
     queryKey: emailKeys.search(q, page, pageSize),
     queryFn: () => searchEmails(q, page, pageSize),
     enabled: q.length > 0,
+  });
+}
+
+/** One email for the detail page; in-flight ones refresh so the status moves live. */
+export function useEmail(id: string) {
+  return useQuery({
+    queryKey: [...emailKeys.all, "detail", id] as const,
+    queryFn: () => getEmail(id),
+    refetchInterval: (q) =>
+      q.state.data?.status === "scheduled" || q.state.data?.status === "processing"
+        ? LIVE_REFRESH_MS
+        : false,
   });
 }

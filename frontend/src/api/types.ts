@@ -59,3 +59,19 @@ export interface SearchResponse {
 export interface SendersResponse {
   count: number;
 }
+
+/** GET /api/emails/:id (404 when missing or not the caller's). */
+export interface EmailDetail {
+  id: string;
+  toEmail: string;
+  subject: string;
+  body: string;
+  status: EmailStatus;
+  scheduledAt: string;
+  sentAt: string | null;
+  failedAt: string | null;
+  /** Ethereal preview link, only for sent emails. */
+  previewUrl: string | null;
+  /** Final failure reason, only for failed emails. */
+  errorMessage: string | null;
+}

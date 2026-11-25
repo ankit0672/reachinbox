@@ -189,6 +189,7 @@ Real Google OAuth (`passport-google-oauth20`), no server-side sessions:
 - **Recipient counts.** The line "N valid · N duplicates · N invalid" uses the same email rule as the API (zod's `z.email()`).
 - **Send / Send Later.** The **Send Later** popover offers presets. The button reads **Send** (start now) or **Send Later**. `startTime` is ISO 8601 **with the browser's offset**, e.g. `2026-11-26T10:00:00+05:30`. A time already in the past sends immediately, and the page says so.
 - **Errors.** API 400 field details are shown on the matching fields. A 503 "saved but not fully queued" explains that the emails are stored and blocks a duplicate resend. On success, a toast shows the server's accepted/duplicate/invalid counts.
+- **Email detail (`/emails/:id`).** Every row opens the email (Figma homepage3, read-only, with no archive, delete or attachments). The page shows the recipient, subject, status, scheduled/sent/failed times, the body, the failure reason and the Ethereal preview link. Back returns to the same tab, page or search.
 - **Slack.** The user menu shows **Connect Slack** (a full-page navigation to `/api/slack/connect`). When connected, it shows "Slack connected ✓ (workspace)" with **Disconnect**. If the server has no Slack app, the item is disabled. Returning to `/dashboard?slack=<outcome>` shows one toast and removes the parameter.
 
 **Trade-off: the lead limit is read at build time.** The compose page warns when a list exceeds `MAX_LEADS_PER_CAMPAIGN`. The frontend reads that value from the root `.env` at build time (a Vite `define`); there is no endpoint for it. The API still enforces its own limit.
@@ -207,6 +208,8 @@ Real Google OAuth (`passport-google-oauth20`), no server-side sessions:
 
 - `scheduled`: `SCHEDULED` and `PROCESSING` rows, in send order `(scheduledAt, seq, id)`.
 - `sent`: `SENT` and `FAILED` rows, newest first by `sentAt` (or `failedAt`, recorded when a row fails for good).
+
+`GET /api/emails/:id` returns one email for the detail page: `id, toEmail, subject, body, status, scheduledAt, sentAt, failedAt, previewUrl, errorMessage`. The lookup is scoped to the signed-in user in the query itself, so someone else's email and a missing one both answer `404 {"error":"Email not found"}`.
 
 `GET /api/senders` returns only `{ count }`, the size of the sender pool, for the compose page. It never returns addresses or credentials.
 
