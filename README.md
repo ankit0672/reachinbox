@@ -28,7 +28,7 @@ curl localhost:3001/health    # 200 when DB, Redis and ES are all reachable
 npm run send:test-email       # sends one mail via sender 1 and prints the Ethereal preview URL
 npm run dev:worker            # separate worker process: consumes the BullMQ email queue
 npm run reindex               # rebuild the Elasticsearch index from Postgres (idempotent)
-npm run seed:emails -- 3 5000 # dev-only: insert 3 email rows due in 5s and enqueue them (until the M4 API exists)
+npm run seed:emails -- 3 5000 # dev-only: insert 3 email rows due in 5s directly (bypasses the API's pre-packing)
 npm test                      # vitest; needs compose up
 ```
 
@@ -36,11 +36,11 @@ Tests use their own BullMQ key prefix (`reachinbox-test-<uuid>`) and delete ever
 
 ## Schedule API (so far)
 
-Until Google login lands (M8), `/api/*` identifies the user with a **dev-only** `X-Dev-User-Email` header (the middleware refuses to start when `NODE_ENV=production`).
+All `/api/*` routes except `/api/auth/*` need a session cookie from Google login (see *Authentication*). With curl, pass it as `-b 'reachinbox_session=<token>'`.
 
 ```bash
 curl -X POST localhost:3001/api/schedule \
-  -H 'Content-Type: application/json' -H 'X-Dev-User-Email: you@example.com' \
+  -H 'Content-Type: application/json' -b 'reachinbox_session=<token>' \
   -d '{"subject":"Hi","body":"Hello","startTime":"2026-12-01T10:00:00Z",
        "delayBetweenMs":2000,"hourlyLimit":50,"leads":["a@example.com","b@example.com"]}'
 ```
@@ -124,3 +124,23 @@ Every email is a document in the `<ES_INDEX_PREFIX>-emails` index (`_id` = email
 - **`GET /api/search?q=&status=&page=&pageSize=`** searches `subject`, `body` and `toEmail`; `status` (`scheduled` / `sent` / `failed`) is an exact filter. Results are **always filtered to the signed-in user**. `pageSize` is capped by `SEARCH_MAX_PAGE_SIZE` and `page x pageSize` by 10,000. Response: `{ total, page, pageSize, results }`.
 - **Elasticsearch is secondary.** If it is down or slow (`ES_REQUEST_TIMEOUT_MS`), scheduling and sending carry on; each failed write logs `[search] ... failed (Postgres is unaffected; run "npm run reindex" to resync)`, and `/api/search` answers `503`. The index is eventually consistent with Postgres.
 - **`npm run reindex`** rebuilds the index from Postgres in chunks (overwriting by `_id`), then walks the index and deletes documents whose row no longer exists. It is idempotent and safe to run while the app is live.
+
+## Authentication (M8)
+
+Real Google OAuth (`passport-google-oauth20`), no server-side sessions:
+
+1. `GET /api/auth/google` sets a random `state` in a short-lived httpOnly cookie and redirects to Google.
+2. `GET /api/auth/google/callback` checks that Google returned the same `state` (CSRF protection for the round trip; the state cookie is single-use), exchanges the code, then creates the `User` by `googleId` on first login and refreshes name, email and avatar on every login. Two simultaneous first logins for the same account are safe: the loser of the insert race re-reads the winner's row.
+3. It sets `reachinbox_session`, a signed JWT (HS256, `JWT_SECRET`, lifetime `JWT_EXPIRES_IN`) in an **httpOnly, SameSite=Lax** cookie (`Secure` in production), and redirects to `FRONTEND_URL/dashboard`. Any failure redirects to `FRONTEND_URL/login?error=<code>` (`invalid_state`, `access_denied`, `oauth_failed`, `google_not_configured`). Redirect targets are fixed config, never taken from the request.
+
+- `GET /api/auth/me` returns `{ id, name, email, avatarUrl }` or `401`. `POST /api/auth/logout` clears the cookie (`204`).
+- Every other `/api/*` route requires the cookie (`401 {"error":"Not authenticated"}` otherwise); a tampered, expired or foreign-signed token, or one for a deleted user, is rejected. `/health` is public; Bull Board keeps its own basic auth.
+- CORS allows only `FRONTEND_URL`, with credentials; other origins get no CORS headers. SameSite=Lax keeps the cookie off cross-site POSTs.
+- Setup: create an OAuth client (type *Web application*) in Google Cloud Console and add `http://localhost:3001/api/auth/google/callback` as an *Authorized redirect URI*; put the client id and secret in `.env`. Without them the server still starts and login redirects with `google_not_configured`.
+
+## Emails API (M8)
+
+`GET /api/emails?status=scheduled|sent&page=&pageSize=` (default `scheduled`, `pageSize` capped by `LIST_MAX_PAGE_SIZE`) returns `{ total, page, pageSize, results }` for the signed-in user only. Each result: `id, toEmail, subject, scheduledAt, sentAt, status, previewUrl` (`previewUrl` only on sent rows).
+
+- `scheduled`: `SCHEDULED` and `PROCESSING` rows, in send order `(scheduledAt, seq, id)`.
+- `sent`: `SENT` and `FAILED` rows, newest first by `sentAt` (or `failedAt`, recorded when a row fails for good).
