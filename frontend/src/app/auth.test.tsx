@@ -27,7 +27,7 @@ describe("auth guard", () => {
     mockApi({ "GET /api/auth/me": () => json(200, ME) });
     renderApp("/dashboard");
     expect(await screen.findByText(ME.name)).toBeInTheDocument();
-    const nav = screen.getByRole("navigation");
+    const nav = screen.getByRole("navigation", { name: "Mailboxes" });
     expect(within(nav).getByRole("link", { name: /scheduled/i })).toHaveAttribute(
       "aria-current",
       "page",

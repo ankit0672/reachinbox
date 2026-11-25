@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes } from "react-router";
 import { RequireAuth } from "../auth/RequireAuth";
 import { DashboardLayout } from "../pages/dashboard/DashboardLayout";
-import { TabPlaceholder } from "../pages/dashboard/TabPlaceholder";
+import { EmailTabPage } from "../pages/dashboard/EmailTabPage";
 import { LoginPage } from "../pages/LoginPage";
 
 export function AppRoutes() {
@@ -11,8 +11,8 @@ export function AppRoutes() {
       <Route element={<RequireAuth />}>
         {/* The backend redirects here after Google login (FRONTEND_URL/dashboard). */}
         <Route path="/dashboard" element={<DashboardLayout />}>
-          <Route index element={<TabPlaceholder tab="scheduled" />} />
-          <Route path="sent" element={<TabPlaceholder tab="sent" />} />
+          <Route index element={<EmailTabPage key="scheduled" tab="scheduled" />} />
+          <Route path="sent" element={<EmailTabPage key="sent" tab="sent" />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

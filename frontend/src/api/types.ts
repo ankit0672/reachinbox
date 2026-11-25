@@ -20,6 +20,10 @@ export interface EmailListItem {
   status: EmailStatus;
   /** Ethereal preview link, only for sent emails. */
   previewUrl: string | null;
+  /** Body with whitespace collapsed, at most 120 chars + "…". */
+  bodyPreview: string;
+  /** Final failure reason, only for failed emails. */
+  errorMessage: string | null;
 }
 
 /** GET /api/emails?status=scheduled|sent&page=&pageSize= */
@@ -28,4 +32,30 @@ export interface EmailListResponse {
   page: number;
   pageSize: number;
   results: EmailListItem[];
+}
+
+/** One hit of GET /api/search (the Elasticsearch document). */
+export interface SearchHit {
+  id: string;
+  campaignId: string;
+  toEmail: string;
+  senderEmail: string;
+  subject: string;
+  body: string;
+  status: EmailStatus;
+  scheduledAt: string;
+  sentAt: string | null;
+}
+
+/** GET /api/search?q=&status=&page=&pageSize= */
+export interface SearchResponse {
+  total: number;
+  page: number;
+  pageSize: number;
+  results: SearchHit[];
+}
+
+/** GET /api/senders */
+export interface SendersResponse {
+  count: number;
 }

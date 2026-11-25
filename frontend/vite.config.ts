@@ -26,6 +26,8 @@ export default defineConfig(({ mode }) => {
       environment: "jsdom",
       setupFiles: ["./src/test/setup.ts"],
       restoreMocks: true,
+      // Fixed zone so formatted times are deterministic; the app uses the browser's zone.
+      env: { TZ: "UTC" },
     },
   };
 });

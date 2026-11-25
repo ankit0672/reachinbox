@@ -90,7 +90,11 @@ export function UserMenu() {
             disabled={logoutMutation.isPending}
             onClick={() => logoutMutation.mutate()}
           >
-            {logoutMutation.isPending ? <Spinner size={16} label="Logging out" /> : <LogOut aria-hidden size={16} />}
+            {logoutMutation.isPending ? (
+              <Spinner size={16} label="Logging out" />
+            ) : (
+              <LogOut aria-hidden size={16} />
+            )}
             Log out
           </button>
         </div>

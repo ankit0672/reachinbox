@@ -1,8 +1,10 @@
 import { apiFetch } from "./client";
 import type { EmailListResponse } from "./types";
 
+export type EmailTab = "scheduled" | "sent";
+
 export interface ListEmailsParams {
-  status: "scheduled" | "sent";
+  status: EmailTab;
   page?: number;
   pageSize?: number;
 }

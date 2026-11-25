@@ -51,7 +51,12 @@ export function LoginPage() {
 
         <form aria-describedby="email-login-note" onSubmit={(e) => e.preventDefault()}>
           <fieldset disabled className="flex flex-col gap-3">
-            <input type="email" placeholder="Email ID" aria-label="Email ID" className={inputClasses} />
+            <input
+              type="email"
+              placeholder="Email ID"
+              aria-label="Email ID"
+              className={inputClasses}
+            />
             <input
               type="password"
               placeholder="Password"
