@@ -110,6 +110,7 @@ export async function processEmail(emailId: string, deps: ProcessDeps): Promise<
       data: {
         status: deps.isFinalAttempt ? "FAILED" : "SCHEDULED",
         errorMessage: err instanceof Error ? err.message : String(err),
+        ...(deps.isFinalAttempt ? { failedAt: new Date() } : {}),
       },
     });
     // A retry keeps the doc at "scheduled"; only the final failure changes it.

@@ -72,6 +72,8 @@ model Email {
   /// When a worker last claimed the row (SCHEDULED -> PROCESSING); used to spot stale claims.
   claimedAt    DateTime?
   sentAt       DateTime?
+  /// When the last attempt failed (status FAILED); orders FAILED rows in the "sent" list.
+  failedAt     DateTime?
   messageId    String?
   previewUrl   String?
   attempts     Int         @default(0)

@@ -156,6 +156,7 @@ describe("SMTP failure path", () => {
     expect(failed.attempts).toBe(3);
     expect(failed.errorMessage).toMatch(/SMTP 421/);
     expect(failed.sentAt).toBeNull();
+    expect(failed.failedAt).not.toBeNull(); // M8: failure time, used to order the "sent" tab
 
     const job = await env.queue.getJob(email.id);
     expect(await job?.getState()).toBe("failed"); // kept, not removed (removeOnFail: false)
