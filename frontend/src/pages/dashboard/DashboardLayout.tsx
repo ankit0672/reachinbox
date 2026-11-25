@@ -1,9 +1,9 @@
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { Clock, RotateCw, Send, type LucideIcon } from "lucide-react";
-import { NavLink, Outlet, useMatch, useSearchParams } from "react-router";
+import { Link, NavLink, Outlet, useMatch, useSearchParams } from "react-router";
 import type { EmailTab } from "../../api/emails";
 import logoUrl from "../../assets/onb-logo.png";
-import { Button } from "../../components/ui/Button";
+import { buttonClasses } from "../../components/ui/buttonStyles";
 import { emailKeys, useEmailCount } from "../../emails/queries";
 import { SearchBox } from "./SearchBox";
 import { SearchResults } from "./SearchResults";
@@ -18,10 +18,9 @@ export function DashboardLayout() {
       <aside className="flex w-[248px] shrink-0 flex-col gap-4 p-4">
         <img src={logoUrl} alt="ONB" className="h-7 w-auto self-start" />
         <UserMenu />
-        {/* Part D wires this to the compose page. */}
-        <Button variant="outline" className="w-full" disabled title="Coming soon">
+        <Link to="/compose" className={buttonClasses({ variant: "outline", className: "w-full" })}>
           Compose
-        </Button>
+        </Link>
         <MailboxNav />
       </aside>
 

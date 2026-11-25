@@ -1,5 +1,6 @@
 import { render } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import type React from "react";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { vi } from "vitest";
 import type { EmailListItem } from "../api/types";
 import { AppProviders } from "../app/AppProviders";
@@ -82,4 +83,17 @@ export function dashboardRoutes(
       return json(200, { total: all.length, page, pageSize, results });
     },
   };
+}
+
+/** Renders one element at `path` with the app's providers (for components with props). */
+export function renderWithProviders(ui: React.ReactElement, path = "/") {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <AppProviders>
+        <Routes>
+          <Route path="*" element={ui} />
+        </Routes>
+      </AppProviders>
+    </MemoryRouter>,
+  );
 }

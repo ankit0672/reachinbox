@@ -37,7 +37,7 @@ describe("auth guard", () => {
       "aria-current",
       "page",
     );
-    expect(screen.getByRole("button", { name: /compose/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /compose/i })).toHaveAttribute("href", "/compose");
   });
 });
 

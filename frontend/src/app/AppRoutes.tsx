@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router";
 import { RequireAuth } from "../auth/RequireAuth";
 import { DashboardLayout } from "../pages/dashboard/DashboardLayout";
 import { EmailTabPage } from "../pages/dashboard/EmailTabPage";
+import { ComposePage } from "../pages/ComposePage";
 import { LoginPage } from "../pages/LoginPage";
 
 export function AppRoutes() {
@@ -14,6 +15,7 @@ export function AppRoutes() {
           <Route index element={<EmailTabPage key="scheduled" tab="scheduled" />} />
           <Route path="sent" element={<EmailTabPage key="sent" tab="sent" />} />
         </Route>
+        <Route path="/compose" element={<ComposePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
