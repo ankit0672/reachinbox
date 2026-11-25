@@ -144,3 +144,21 @@ Real Google OAuth (`passport-google-oauth20`), no server-side sessions:
 
 - `scheduled`: `SCHEDULED` and `PROCESSING` rows, in send order `(scheduledAt, seq, id)`.
 - `sent`: `SENT` and `FAILED` rows, newest first by `sentAt` (or `failedAt`, recorded when a row fails for good).
+
+## Slack tunnel (local dev)
+
+**Why:** Slack only accepts an `https://` OAuth redirect URL, and `http://localhost` doesn't qualify (Google does accept localhost, which is why login needs no tunnel). A free ngrok **static domain** gives the local API a fixed public https address, so the redirect URL configured in the Slack app never changes.
+
+**One-time setup**
+1. Install the ngrok CLI (https://ngrok.com/download; on Arch `yay -S ngrok`) and run `ngrok config add-authtoken <your-token>` once. The token lives in ngrok's own config, never in this repo's `.env`.
+2. Claim your free static domain at https://dashboard.ngrok.com/domains and set it in `.env`: `NGROK_DOMAIN=your-name.ngrok-free.dev`.
+3. Use `https://<NGROK_DOMAIN>/api/slack/callback` as `SLACK_REDIRECT_URL` and as the Slack app's Redirect URL.
+
+**Run it** in its own terminal, separate from the API and worker (the app never starts ngrok itself):
+```bash
+cd backend && npm run tunnel     # = ngrok http --url=$NGROK_DOMAIN $API_PORT
+```
+
+- It only needs to be running **during the "Connect Slack" flow**, when Slack redirects the browser back to the callback. The worker's Slack messages are *outbound* calls to Slack's API and don't use the tunnel.
+- On the free plan, the first visit to the ngrok URL in a browser shows an ngrok **"You are about to visit..." warning page**; click *Visit Site* to continue to the callback. This is ngrok's interstitial, not an error.
+- `npm run tunnel` exits with a clear message if `NGROK_DOMAIN` is empty or the ngrok CLI is not installed.

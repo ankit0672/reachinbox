@@ -22,7 +22,8 @@
     "dev:worker": "tsx watch src/worker.ts",
     "start:worker": "node dist/worker.js",
     "seed:emails": "tsx src/scripts/seedEmails.ts",
-    "reindex": "tsx src/scripts/reindex.ts"
+    "reindex": "tsx src/scripts/reindex.ts",
+    "tunnel": "tsx src/scripts/tunnel.ts"
   },
   "dependencies": {
     "@bull-board/api": "^9.14.0",
