@@ -1,12 +1,9 @@
 import { Clock, Send } from "lucide-react";
-import { useSearchParams } from "react-router";
 import type { EmailTab } from "../../api/emails";
 import { EmailListView } from "../../emails/EmailListView";
-import { parsePage, toListState } from "../../emails/listState";
+import { PAGE_SIZE, toListState, usePageParam } from "../../emails/listState";
 import { useEmailList } from "../../emails/queries";
 import { fromListItem } from "../../emails/rowData";
-
-export const PAGE_SIZE = 20;
 
 const COPY = {
   scheduled: {
@@ -23,19 +20,11 @@ const COPY = {
   },
 } as const;
 
-/** A dashboard tab. The page lives in the URL (?page=N) so it survives reloads. */
+/** A dashboard tab: one page of Scheduled or Sent. */
 export function EmailTabPage({ tab }: { tab: EmailTab }) {
-  const [params, setParams] = useSearchParams();
-  const page = parsePage(params.get("page"));
+  const [page, setPage] = usePageParam();
   // Only the Scheduled tab polls: that's where emails visibly move to Sent.
   const query = useEmailList(tab, page, PAGE_SIZE, tab === "scheduled");
-
-  const setPage = (next: number) =>
-    setParams((p) => {
-      if (next <= 1) p.delete("page");
-      else p.set("page", String(next));
-      return p;
-    });
 
   return (
     <EmailListView

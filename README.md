@@ -166,6 +166,35 @@ Real Google OAuth (`passport-google-oauth20`), no server-side sessions:
   The tables, compose page and Slack button arrive in M11.
 - **Design tokens.** They live in `frontend/src/index.css` (`@theme`). Components use token names (`bg-primary`, `text-ink-muted`, …), never raw hex values. Colours were sampled from the screenshots; sizes are estimates at a 1440px frame.
 
+### Dashboard, search, compose, Slack (M11)
+
+- **Lists.** The Scheduled and Sent tabs, and search results, share one list view:
+  - a loading skeleton, an empty state, and an error state with **Retry**;
+  - pagination, with the page kept in the URL (`?page=N`).
+
+  Row chips, with times in the browser's zone:
+  - scheduled: orange chip with the time, e.g. `Tue 9:15:12 AM`;
+  - processing: orange `Sending…`;
+  - sent: grey chip with the sent time;
+  - failed: red `Failed`, with the error message in a tooltip.
+
+  The sidebar counts come from `pageSize=1` queries. **Refresh** refetches every list. While the Scheduled tab is open, the list and the counts refetch every 10 s. Polling pauses while the browser tab is hidden.
+- **Search.** The search bar calls `GET /api/search` 300 ms after typing stops, and the query is kept in the URL (`?q=`). The clear button or Escape returns to the tab list.
+- **Compose (`/compose`).** A full page with these fields:
+  - **From:** read-only "Sender pool · N accounts", from `GET /api/senders`.
+  - **To:** recipient chips with a `+N` overflow. Addresses can be typed (Enter, comma or paste) or loaded with **Upload List**. Upload List reads CSV/TXT in the browser with papaparse and picks up any token containing "@" in any column.
+  - **Delay between 2 emails:** in seconds, at least 1.
+  - **Hourly limit:** per sender, a whole number of at least 1.
+  - **Body:** plain text.
+- **Recipient counts.** The line "N valid · N duplicates · N invalid" uses the same email rule as the API (zod's `z.email()`).
+- **Send / Send Later.** The **Send Later** popover offers presets. The button reads **Send** (start now) or **Send Later**. `startTime` is ISO 8601 **with the browser's offset**, e.g. `2026-11-26T10:00:00+05:30`. A time already in the past sends immediately, and the page says so.
+- **Errors.** API 400 field details are shown on the matching fields. A 503 "saved but not fully queued" explains that the emails are stored and blocks a duplicate resend. On success, a toast shows the server's accepted/duplicate/invalid counts.
+- **Slack.** The user menu shows **Connect Slack** (a full-page navigation to `/api/slack/connect`). When connected, it shows "Slack connected ✓ (workspace)" with **Disconnect**. If the server has no Slack app, the item is disabled. Returning to `/dashboard?slack=<outcome>` shows one toast and removes the parameter.
+
+**Trade-off: the lead limit is read at build time.** The compose page warns when a list exceeds `MAX_LEADS_PER_CAMPAIGN`. The frontend reads that value from the root `.env` at build time (a Vite `define`); there is no endpoint for it. The API still enforces its own limit.
+
+**Trade-off: leads are sent as entered.** Duplicates and invalid entries are posted with the list, and the server dedupes and validates again. Its counts are the ones shown after scheduling. Duplicates and invalid entries therefore count toward the per-campaign limit.
+
 **Trade-off: email/password login is shown but disabled.** The Figma login card has email/password fields. Only Google sign-in exists, so the fields, divider and Login button are rendered **disabled** for design fidelity, with the note "Email login isn't available yet, please use Google." There is no email/password endpoint and no client-side auth logic behind them.
 
 ## Emails API (M8)
