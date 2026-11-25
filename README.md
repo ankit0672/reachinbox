@@ -170,10 +170,16 @@ Real Google OAuth (`passport-google-oauth20`), no server-side sessions:
 
 ## Emails API (M8)
 
-`GET /api/emails?status=scheduled|sent&page=&pageSize=` (default `scheduled`, `pageSize` capped by `LIST_MAX_PAGE_SIZE`) returns `{ total, page, pageSize, results }` for the signed-in user only. Each result: `id, toEmail, subject, scheduledAt, sentAt, status, previewUrl` (`previewUrl` only on sent rows).
+`GET /api/emails?status=scheduled|sent&page=&pageSize=` (default `scheduled`, `pageSize` capped by `LIST_MAX_PAGE_SIZE`) returns `{ total, page, pageSize, results }` for the signed-in user only. Each result: `id, toEmail, subject, scheduledAt, sentAt, status, previewUrl, bodyPreview, errorMessage`.
+
+- `previewUrl` is set only on sent rows.
+- `bodyPreview` is the body with whitespace collapsed, cut to 120 characters plus `…`. Postgres does the cut, so full bodies never leave the database for a list.
+- `errorMessage` is set only on `FAILED` rows. A row that is still retrying keeps its last error internally, but the list doesn't show it.
 
 - `scheduled`: `SCHEDULED` and `PROCESSING` rows, in send order `(scheduledAt, seq, id)`.
 - `sent`: `SENT` and `FAILED` rows, newest first by `sentAt` (or `failedAt`, recorded when a row fails for good).
+
+`GET /api/senders` returns only `{ count }`, the size of the sender pool, for the compose page. It never returns addresses or credentials.
 
 ## Slack tunnel (local dev)
 

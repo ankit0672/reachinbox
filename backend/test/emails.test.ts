@@ -25,6 +25,8 @@ type Row = {
   sentAt?: Date;
   failedAt?: Date;
   previewUrl?: string;
+  body?: string;
+  errorMessage?: string;
 };
 
 async function seedRows(userId: string, rows: Row[]) {
@@ -49,8 +51,9 @@ async function seedRows(userId: string, rows: Row[]) {
         seq: r.seq,
         toEmail: r.to,
         subject: `Subject ${r.to}`,
-        body: "B",
+        body: r.body ?? "B",
         scheduledAt: r.scheduledAt,
+        errorMessage: r.errorMessage,
         status: r.status,
         sentAt: r.sentAt,
         failedAt: r.failedAt,
@@ -81,7 +84,14 @@ beforeEach(async () => {
       sentAt: T(2),
       previewUrl: "https://ethereal.email/message/old",
     },
-    { to: "a-failed@x.com", status: "FAILED", scheduledAt: T(3), seq: 4, failedAt: T(5) },
+    {
+      to: "a-failed@x.com",
+      status: "FAILED",
+      scheduledAt: T(3),
+      seq: 4,
+      failedAt: T(5),
+      errorMessage: "SMTP 421 service not available",
+    },
     {
       to: "a-sent-new@x.com",
       status: "SENT",
@@ -131,6 +141,8 @@ describe("GET /api/emails", () => {
         scheduledAt: T(4).toISOString(),
         sentAt: T(8).toISOString(),
         previewUrl: "https://ethereal.email/message/new",
+        bodyPreview: "B",
+        errorMessage: null,
       },
       {
         id: expect.any(String),
@@ -140,6 +152,8 @@ describe("GET /api/emails", () => {
         scheduledAt: T(3).toISOString(),
         sentAt: null,
         previewUrl: null,
+        bodyPreview: "B",
+        errorMessage: "SMTP 421 service not available",
       },
       {
         id: expect.any(String),
@@ -149,8 +163,52 @@ describe("GET /api/emails", () => {
         scheduledAt: T(1).toISOString(),
         sentAt: T(2).toISOString(),
         previewUrl: "https://ethereal.email/message/old",
+        bodyPreview: "B",
+        errorMessage: null,
       },
     ]);
+  });
+
+  it("bodyPreview: whitespace collapsed, cut to 120 characters with an ellipsis", async () => {
+    const long = `Hi   there,\n\n\tthis is   line two. ${"word ".repeat(60)}`;
+    await seedRows(bob.user.id, [
+      { to: "b-long@x.com", status: "SCHEDULED", scheduledAt: T(50), seq: 2, body: long },
+      {
+        to: "b-short@x.com",
+        status: "SCHEDULED",
+        scheduledAt: T(51),
+        seq: 3,
+        body: "  Short\n body ",
+      },
+    ]);
+    const res = await get(bob.cookie, { status: "scheduled" });
+    const byTo = Object.fromEntries(
+      res.body.results.map((r: { toEmail: string; bodyPreview: string }) => [
+        r.toEmail,
+        r.bodyPreview,
+      ]),
+    );
+    expect(byTo["b-short@x.com"]).toBe("Short body");
+    const preview: string = byTo["b-long@x.com"];
+    expect(preview.startsWith("Hi there, this is line two. word word")).toBe(true);
+    expect(preview).not.toMatch(/\s{2,}|[\n\t]/);
+    expect(preview.endsWith("…")).toBe(true);
+    expect(preview.length).toBeLessThanOrEqual(121);
+  });
+
+  it("errorMessage is only returned for FAILED rows", async () => {
+    await seedRows(bob.user.id, [
+      {
+        to: "b-retrying@x.com",
+        status: "SCHEDULED",
+        scheduledAt: T(52),
+        seq: 4,
+        errorMessage: "ETIMEDOUT (attempt 1)",
+      },
+    ]);
+    const res = await get(bob.cookie, { status: "scheduled" });
+    const row = res.body.results.find((r: { toEmail: string }) => r.toEmail === "b-retrying@x.com");
+    expect(row.errorMessage).toBeNull();
   });
 
   it("is strictly scoped to the signed-in user", async () => {

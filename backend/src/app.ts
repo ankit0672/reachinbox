@@ -14,6 +14,7 @@ import { createEmailsRouter, type EmailsDeps } from "./routes/emails.js";
 import { createHealthRouter, type HealthChecks } from "./routes/health.js";
 import { createScheduleRouter, type ScheduleDeps } from "./routes/schedule.js";
 import { createSearchRouter, type SearchDeps } from "./routes/search.js";
+import { createSendersRouter } from "./routes/senders.js";
 import { createSlackRouters, type SlackDeps } from "./routes/slack.js";
 
 export interface AppOptions {
@@ -61,6 +62,7 @@ export function createApp(healthChecks: HealthChecks, opts: AppOptions = {}) {
     if (opts.schedule) api.use("/schedule", createScheduleRouter(opts.schedule));
     if (opts.search) api.use("/search", createSearchRouter(opts.search));
     if (opts.emails) api.use("/emails", createEmailsRouter(opts.emails));
+    api.use("/senders", createSendersRouter());
     if (slack) api.use("/slack", slack.authed);
     app.use("/api", api);
   }
