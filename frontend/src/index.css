@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens from the Figma screenshots (design/). Colours were sampled
+ * from the PNGs; sizes are estimates at a 1440px frame. Components use these
+ * names only (bg-primary, text-ink-muted, ...), never raw hex values.
+ */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-primary: #00a540;
+  --color-primary-hover: #009139;
+  --color-primary-soft: #e5f6eb;
+  --color-primary-soft-hover: #d6f0df;
+  --color-accent-avatar: #08c851;
+
+  --color-surface: #ffffff;
+  --color-surface-muted: #f4f7f5;
+  --color-surface-editor: #fafafa;
+
+  --color-border: #f2f3f5;
+  --color-divider: #ececf0;
+  --color-row-divider: #f6f7f9;
+
+  --color-ink: #1f2328;
+  --color-ink-muted: #8a8f98;
+  --color-ink-subtle: #a6abb3;
+
+  --color-chip-scheduled: #ffecd3;
+  --color-chip-scheduled-ink: #e8731a;
+  --color-chip-neutral: #f3f4f6;
+
+  --color-danger: #d92d20;
+  --color-danger-soft: #fef3f2;
+
+  --radius-control: 8px;
+  --radius-card: 12px;
+
+  --shadow-popover: 0 8px 24px rgb(16 24 40 / 0.12), 0 2px 6px rgb(16 24 40 / 0.06);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-surface font-sans text-ink antialiased;
+  }
+}
