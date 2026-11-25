@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { describeError } from "../lib/describeError.js";
 
 export type HealthCheck = () => Promise<unknown>;
 export type HealthChecks = Record<string, HealthCheck>;
@@ -18,7 +19,7 @@ async function runCheck(check: HealthCheck, timeoutMs: number): Promise<CheckRes
     await withTimeout(check, timeoutMs);
     return { status: "ok" };
   } catch (err) {
-    return { status: "down", error: err instanceof Error ? err.message : String(err) };
+    return { status: "down", error: describeError(err) };
   }
 }
 
