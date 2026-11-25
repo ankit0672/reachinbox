@@ -1,11 +1,10 @@
 import request from "supertest";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/db/prisma.js";
-import { Prisma } from "../src/generated/prisma/client.js";
-import { createDevUserMiddleware } from "../src/middleware/devUser.js";
 import type { EmailQueue } from "../src/queue/emailQueue.js";
 import type { PlanningSettings } from "../src/routes/schedule.js";
+import { loginAs, testAuthConfig } from "./helpers/auth.js";
 import { resetDb, seedSenders } from "./helpers/seed.js";
 import { createTestQueue } from "./helpers/testQueue.js";
 
@@ -14,13 +13,17 @@ const checks = { database: ok, redis: ok, elasticsearch: ok };
 const USER = "owner@example.com";
 
 let env: ReturnType<typeof createTestQueue>;
+let cookie: string; // session for USER (M8: real signed session cookie)
 
 function appWith(
   queue: Pick<EmailQueue, "addBulk"> = env.queue,
   enqueueChunkSize = 500,
   planning: Partial<PlanningSettings> = {},
 ) {
-  return createApp(checks, { schedule: { emailQueue: queue, enqueueChunkSize, planning } });
+  return createApp(checks, {
+    auth: testAuthConfig(),
+    schedule: { emailQueue: queue, enqueueChunkSize, planning },
+  });
 }
 
 function validBody(overrides: Record<string, unknown> = {}) {
@@ -38,7 +41,7 @@ function validBody(overrides: Record<string, unknown> = {}) {
 function post(body: unknown, app = appWith()) {
   return request(app)
     .post("/api/schedule")
-    .set("X-Dev-User-Email", USER)
+    .set("Cookie", cookie)
     .send(body as object);
 }
 
@@ -46,74 +49,24 @@ beforeEach(async () => {
   await resetDb();
   await seedSenders(3);
   env = createTestQueue();
+  ({ cookie } = await loginAs(USER));
 });
 afterEach(() => env.cleanup());
 afterAll(() => prisma.$disconnect());
 
-describe("dev user middleware (TODO(M8): replaced by Google auth)", () => {
-  it("rejects requests without X-Dev-User-Email", async () => {
+describe("authentication (M8: session cookie; OAuth itself is covered in auth.test.ts)", () => {
+  it("rejects requests without a session cookie", async () => {
     const res = await request(appWith()).post("/api/schedule").send(validBody());
     expect(res.status).toBe(401);
   });
 
-  it("refuses to be created when NODE_ENV=production", () => {
-    expect(() => createDevUserMiddleware("production")).toThrow(/production/);
-  });
-
-  it("survives concurrent first requests for a brand-new user (upsert race)", async () => {
-    // Called directly (no HTTP) so the 20 upserts really overlap.
-    const middleware = createDevUserMiddleware("test");
-    const outcomes = await Promise.all(
-      Array.from({ length: 20 }, () => {
-        const req = { header: () => "fresh@example.com" } as unknown as Parameters<
-          typeof middleware
-        >[0];
-        const res = { status: () => ({ json: () => {} }) } as unknown as Parameters<
-          typeof middleware
-        >[1];
-        return new Promise<string>((resolve) => {
-          Promise.resolve(middleware(req, res, () => resolve(req.user ? "ok" : "no user"))).catch(
-            (err: Error) => resolve(`error: ${err.message.split("\n").pop()}`),
-          );
-        });
-      }),
-    );
-    expect(outcomes).toEqual(Array(20).fill("ok"));
-    expect(await prisma.user.count({ where: { email: "fresh@example.com" } })).toBe(1);
-  });
-
-  it("recovers deterministically when it loses the user-creation race (P2002)", async () => {
-    let winnerId = "";
-    const spy = vi.spyOn(prisma.user, "upsert").mockImplementationOnce((async () => {
-      // Another request creates the same user first, then our insert hits the unique key.
-      winnerId = (
-        await prisma.user.create({
-          data: { googleId: "dev:racer@example.com", email: "racer@example.com", name: "racer" },
-        })
-      ).id;
-      throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
-        code: "P2002",
-        clientVersion: "test",
-      });
-    }) as never);
-
-    const middleware = createDevUserMiddleware("test");
-    const req = { header: () => "racer@example.com" } as unknown as Parameters<
-      typeof middleware
-    >[0];
-    const res = {} as Parameters<typeof middleware>[1];
-    await new Promise<void>((resolve, reject) => {
-      Promise.resolve(middleware(req, res, () => resolve())).catch(reject);
+  it("schedules as the user in the session cookie", async () => {
+    const res = await post(validBody());
+    const campaign = await prisma.campaign.findUniqueOrThrow({
+      where: { id: res.body.campaignId },
     });
-    spy.mockRestore();
-    expect(req.user?.id).toBe(winnerId);
-  });
-
-  it("upserts the user from the header", async () => {
-    await post(validBody());
-    await post(validBody({ subject: "again" }));
-    const users = await prisma.user.findMany({ where: { email: USER } });
-    expect(users).toHaveLength(1);
+    const user = await prisma.user.findFirstOrThrow({ where: { email: USER } });
+    expect(campaign.userId).toBe(user.id);
   });
 });
 
@@ -137,7 +90,7 @@ describe("POST /api/schedule validation", () => {
   it("rejects malformed JSON with 400", async () => {
     const res = await request(appWith())
       .post("/api/schedule")
-      .set("X-Dev-User-Email", USER)
+      .set("Cookie", cookie)
       .set("Content-Type", "application/json")
       .send('{"subject": ');
     expect(res.status).toBe(400);

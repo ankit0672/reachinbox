@@ -4,6 +4,7 @@ import { createApp } from "../src/app.js";
 import { prisma } from "../src/db/prisma.js";
 import type { EmailQueue } from "../src/queue/emailQueue.js";
 import type { EmailIndex } from "../src/search/emailIndex.js";
+import { loginAs, testAuthConfig } from "./helpers/auth.js";
 import { resetDb, seedSenders } from "./helpers/seed.js";
 import { createTestIndex, deadIndex } from "./helpers/testIndex.js";
 import { createTestQueue } from "./helpers/testQueue.js";
@@ -15,9 +16,12 @@ const BOB = "bob@example.com";
 
 let env: ReturnType<typeof createTestQueue>;
 let t: Awaited<ReturnType<typeof createTestIndex>>;
+// email -> session cookie (M8: real signed session cookies)
+const sessions = new Map<string, string>();
 
 function appWith(index: EmailIndex = t.index, queue: Pick<EmailQueue, "addBulk"> = env.queue) {
   return createApp(checks, {
+    auth: testAuthConfig(),
     schedule: { emailQueue: queue, enqueueChunkSize: 500, search: index },
     search: { index, maxPageSize: 50 },
   });
@@ -26,7 +30,7 @@ function appWith(index: EmailIndex = t.index, queue: Pick<EmailQueue, "addBulk">
 function schedule(user: string, subject: string, leads: string[], app = appWith()) {
   return request(app)
     .post("/api/schedule")
-    .set("X-Dev-User-Email", user)
+    .set("Cookie", sessions.get(user)!)
     .send({
       subject,
       body: "Body text",
@@ -38,7 +42,7 @@ function schedule(user: string, subject: string, leads: string[], app = appWith(
 }
 
 function search(user: string, query: Record<string, string | number>, app = appWith()) {
-  return request(app).get("/api/search").set("X-Dev-User-Email", user).query(query);
+  return request(app).get("/api/search").set("Cookie", sessions.get(user)!).query(query);
 }
 
 beforeEach(async () => {
@@ -46,6 +50,7 @@ beforeEach(async () => {
   await seedSenders(3);
   env = createTestQueue();
   t = await createTestIndex();
+  for (const u of [ALICE, BOB]) sessions.set(u, (await loginAs(u)).cookie);
 });
 afterEach(async () => {
   await env.cleanup();

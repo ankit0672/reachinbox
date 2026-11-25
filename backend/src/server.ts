@@ -1,4 +1,5 @@
 import { createApp } from "./app.js";
+import { authConfigFromEnv } from "./auth/config.js";
 import { env } from "./config/env.js";
 import { closeInfraClients, realHealthChecks } from "./health/realChecks.js";
 import { createEmailQueue } from "./queue/emailQueue.js";
@@ -21,7 +22,14 @@ const emailQueue = createEmailQueue({
 // Idempotent; if Elasticsearch is down the API still starts (search answers 503).
 await bestEffort(`ensure index ${emailIndex.name}`, () => emailIndex.ensureIndex());
 
+const auth = authConfigFromEnv();
+if (!auth.google) {
+  console.warn("[auth] GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set: Google login is disabled");
+}
+
 const app = createApp(realHealthChecks, {
+  auth,
+  emails: { maxPageSize: env.LIST_MAX_PAGE_SIZE },
   schedule: { emailQueue, enqueueChunkSize: env.ENQUEUE_CHUNK_SIZE, search: emailIndex },
   search: { index: emailIndex, maxPageSize: env.SEARCH_MAX_PAGE_SIZE },
   bullBoard: {
@@ -35,6 +43,7 @@ const app = createApp(realHealthChecks, {
 const server = app.listen(env.API_PORT, () => {
   console.log(`[api] listening on http://localhost:${env.API_PORT}`);
   console.log(`[api] Bull Board: http://localhost:${env.API_PORT}/admin/queues`);
+  console.log(`[api] Google login: http://localhost:${env.API_PORT}/api/auth/google`);
 });
 
 function shutdown(signal: string) {

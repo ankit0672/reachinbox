@@ -3,6 +3,21 @@ import { z } from "zod";
 // Pure schema, no dotenv/process access, so it can be unit tested.
 // Variables are added here milestone by milestone as code starts using them;
 // .env.example already lists the later ones (limits, Google, Slack, ...).
+// "" in .env means "not set".
+const optionalString = z.preprocess((v) => (v === "" ? undefined : v), z.string().optional());
+
+// "900" (seconds), "15m", "12h", "7d" -> seconds
+const UNIT_SECONDS = { s: 1, m: 60, h: 3600, d: 86_400 } as const;
+const duration = z
+  .string()
+  .regex(/^\d+[smhd]?$/, 'use seconds or a number with s/m/h/d, e.g. "7d"')
+  .transform((v) => {
+    const unit = (/[smhd]$/.test(v) ? v.slice(-1) : "s") as keyof typeof UNIT_SECONDS;
+    return Number.parseInt(v, 10) * UNIT_SECONDS[unit];
+  });
+
+const PLACEHOLDER_JWT_SECRET = "change-me-to-a-long-random-string";
+
 const schema = z.object({
   DATABASE_URL: z.url(),
   REDIS_URL: z.url(),
@@ -41,6 +56,13 @@ const schema = z.object({
   ES_BULK_CHUNK_SIZE: z.coerce.number().int().positive().default(500),
   ES_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   SEARCH_MAX_PAGE_SIZE: z.coerce.number().int().positive().max(1000).default(100),
+  // Auth (Google OAuth + JWT session cookie)
+  GOOGLE_CLIENT_ID: optionalString,
+  GOOGLE_CLIENT_SECRET: optionalString,
+  GOOGLE_CALLBACK_URL: z.url().default("http://localhost:3001/api/auth/google/callback"),
+  JWT_SECRET: z.string().min(32, "must be at least 32 characters"),
+  JWT_EXPIRES_IN: duration.prefault("7d"), // prefault: the default goes through the transform
+  LIST_MAX_PAGE_SIZE: z.coerce.number().int().positive().max(1000).default(100),
   // Bull Board basic auth; empty = not configured
   BULL_BOARD_USER: z.string().optional(),
   BULL_BOARD_PASS: z.string().optional(),
@@ -50,6 +72,19 @@ const schema = z.object({
 // socket timeouts. A PROCESSING row younger than that may still be mid-send.
 const BULLMQ_LOCK_MS = 30_000;
 const checked = schema.superRefine((env, ctx) => {
+  if (env.NODE_ENV === "production") {
+    if (env.JWT_SECRET === PLACEHOLDER_JWT_SECRET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["JWT_SECRET"],
+        message: "is still the .env.example placeholder",
+      });
+    }
+    for (const key of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] as const) {
+      if (!env[key])
+        ctx.addIssue({ code: "custom", path: [key], message: "is required in production" });
+    }
+  }
   const minStale = 3 * env.SMTP_TIMEOUT_MS + BULLMQ_LOCK_MS;
   if (env.STALE_PROCESSING_MS < minStale) {
     ctx.addIssue({

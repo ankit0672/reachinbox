@@ -5,6 +5,7 @@ const valid = {
   DATABASE_URL: "postgresql://u:p@localhost:5434/db",
   REDIS_URL: "redis://localhost:6380",
   ELASTICSEARCH_URL: "http://localhost:9200",
+  JWT_SECRET: "x".repeat(32),
 };
 
 describe("parseEnv", () => {
@@ -79,6 +80,37 @@ describe("parseEnv", () => {
     expect(() =>
       parseEnv({ ...valid, SMTP_TIMEOUT_MS: "60000", STALE_PROCESSING_MS: "120000" }),
     ).toThrowError(/STALE_PROCESSING_MS/);
+  });
+
+  it("reads auth settings: JWT expiry as seconds, Google credentials optional outside production", () => {
+    const env = parseEnv(valid);
+    expect(env.JWT_EXPIRES_IN).toBe(7 * 86_400);
+    expect(env.GOOGLE_CLIENT_ID).toBeUndefined();
+    expect(parseEnv({ ...valid, JWT_EXPIRES_IN: "12h" }).JWT_EXPIRES_IN).toBe(43_200);
+    expect(parseEnv({ ...valid, JWT_EXPIRES_IN: "900" }).JWT_EXPIRES_IN).toBe(900);
+    expect(parseEnv({ ...valid, GOOGLE_CLIENT_ID: "" }).GOOGLE_CLIENT_ID).toBeUndefined();
+    expect(() => parseEnv({ ...valid, JWT_EXPIRES_IN: "soon" })).toThrowError(/JWT_EXPIRES_IN/);
+  });
+
+  it("requires a JWT_SECRET of at least 32 characters", () => {
+    expect(() => parseEnv({ ...valid, JWT_SECRET: "short" })).toThrowError(/JWT_SECRET/);
+    expect(() => parseEnv({ ...valid, JWT_SECRET: undefined })).toThrowError(/JWT_SECRET/);
+  });
+
+  it("in production, refuses the placeholder JWT secret and missing Google credentials", () => {
+    const prod = {
+      ...valid,
+      NODE_ENV: "production",
+      GOOGLE_CLIENT_ID: "id",
+      GOOGLE_CLIENT_SECRET: "secret",
+    };
+    expect(() => parseEnv(prod)).not.toThrow();
+    expect(() =>
+      parseEnv({ ...prod, JWT_SECRET: "change-me-to-a-long-random-string" }),
+    ).toThrowError(/JWT_SECRET/);
+    expect(() => parseEnv({ ...prod, GOOGLE_CLIENT_SECRET: "" })).toThrowError(
+      /GOOGLE_CLIENT_SECRET/,
+    );
   });
 
   it("rejects malformed URLs", () => {
