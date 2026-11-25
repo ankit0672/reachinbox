@@ -33,6 +33,15 @@ npm run seed:emails -- --count 3 --delay 5000   # dev-only: insert rows directly
 npm test                      # vitest; needs compose up
 ```
 
+Frontend, in a second terminal (needs the API running):
+
+```bash
+cd frontend && npm install
+npm run dev                   # http://localhost:5173 (log in here)
+npm test                      # vitest + Testing Library (no backend needed)
+npm run lint && npm run typecheck && npm run build
+```
+
 Tests use their own BullMQ key prefix (`reachinbox-test-<uuid>`) and delete every key under it afterwards, so they never touch dev jobs under `reachinbox:`.
 
 ## Schedule API (so far)
@@ -138,6 +147,26 @@ Real Google OAuth (`passport-google-oauth20`), no server-side sessions:
 - Every other `/api/*` route requires the cookie (`401 {"error":"Not authenticated"}` otherwise); a tampered, expired or foreign-signed token, or one for a deleted user, is rejected. `/health` is public; Bull Board keeps its own basic auth.
 - CORS allows only `FRONTEND_URL`, with credentials; other origins get no CORS headers. SameSite=Lax keeps the cookie off cross-site POSTs.
 - Setup: create an OAuth client (type *Web application*) in Google Cloud Console and add `http://localhost:3001/api/auth/google/callback` as an *Authorized redirect URI*; put the client id and secret in `.env`. Without them the server still starts and login redirects with `google_not_configured`.
+
+## Frontend (M10)
+
+`frontend/`: Vite, React 19, TypeScript, Tailwind v4, React Router, TanStack Query, lucide icons. The design comes from the Figma screenshots in [`design/`](design/).
+
+- **One origin.** The app only calls relative `/api/...` paths (`credentials: 'include'`). In dev, Vite proxies `/api` and `/admin` to `http://localhost:${API_PORT}` (read from the root `.env`). In production (M13), one origin serves both. No backend URL appears in frontend code.
+- **Login.** Open `http://localhost:5173`, then click **Login with Google**. That navigates to `/api/auth/google`. After Google, the API redirects to `FRONTEND_URL/dashboard` (`FRONTEND_URL=http://localhost:5173`). `/login?error=<code>` shows a readable message. Unknown codes get a generic message and are never echoed.
+- **Google callback port.** The Google callback still lands on `:3001` (`GOOGLE_CALLBACK_URL`). That is fine on localhost: cookies are not port-scoped, so the state cookie set through the `:5173` proxy reaches the callback, and the session cookie reaches the app.
+- **Guard.** `/dashboard` needs `GET /api/auth/me`. A `401` from any query or mutation clears the cache and goes to `/login`. Any other failure, such as the API being down, shows "Can't reach the server" with a retry, so an outage isn't mistaken for being logged out.
+- **Shell.** The Figma sidebar contains:
+  - the logo;
+  - the user card: avatar with a letter fallback, name, email;
+  - a ⌄ menu with **Log out** (`POST /api/auth/logout`) and a *Connect Slack* placeholder;
+  - Compose;
+  - the Scheduled and Sent tabs.
+
+  The tables, compose page and Slack button arrive in M11.
+- **Design tokens.** They live in `frontend/src/index.css` (`@theme`). Components use token names (`bg-primary`, `text-ink-muted`, …), never raw hex values. Colours were sampled from the screenshots; sizes are estimates at a 1440px frame.
+
+**Trade-off: email/password login is shown but disabled.** The Figma login card has email/password fields. Only Google sign-in exists, so the fields, divider and Login button are rendered **disabled** for design fidelity, with the note "Email login isn't available yet, please use Google." There is no email/password endpoint and no client-side auth logic behind them.
 
 ## Emails API (M8)
 
